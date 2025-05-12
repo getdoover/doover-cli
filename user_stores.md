@@ -8,6 +8,6 @@ As an Application Developer I want to be able to easily run a simulator on my co
 
 As an Application Developer I want to be able to run a basic command to compile and upload my application version and config information so I don’t have to worry about running commands that I might not know
 
-As an Application Developer I want to be able to setup CI/CD to deploy my application and config swell as run the integration tests that I wrote for my application.
+As an Application Developer I want to be able to setup CI/CD to deploy my application and config swell as run the integration tests that I wrote for my application so that i don't need to worry about how to ship code.
 
 As an Application Developer I want to be able to open channel viewer connected to my simulation dda so I can easily test aspects of my code without having to worry about connecting everything properly
