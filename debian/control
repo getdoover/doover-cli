@@ -1,0 +1,13 @@
+Source: doover-CHANGEME
+Section: misc
+Priority: extra
+Maintainer: Doover Team <developers@doover.com>
+Build-Depends: debhelper (>= 11.0.0), dh-exec
+Homepage:
+Standards-Version: 3.9.2
+
+Package: doover-CHANGEME
+Architecture: all
+Depends: python3,
+  ${misc:Depends}
+Description: CHANGEME

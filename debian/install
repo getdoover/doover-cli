@@ -1,0 +1,2 @@
+#!/usr/bin/dh-exec
+src/doover_CHANGEME.py => usr/bin/doover-CHANGEME
