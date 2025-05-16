@@ -1,13 +1,22 @@
-Source: doover-CHANGEME
+Source: doover-cli
 Section: misc
 Priority: extra
 Maintainer: Doover Team <developers@doover.com>
-Build-Depends: debhelper (>= 11.0.0), dh-exec
-Homepage:
-Standards-Version: 3.9.2
+Build-Depends: debhelper (>= 11~),
+               dh-python,
+               python3-all,
+               python3-setuptools
+Homepage: https://doover.com
+Standards-Version: 4.1.1
 
-Package: doover-CHANGEME
+Package: doover-cli
 Architecture: all
 Depends: python3,
   ${misc:Depends}
-Description: CHANGEME
+  ${python3:Depends}
+  python3-paramiko,
+  python3-pydoover,
+  python3-requests,
+  python3-typer
+
+Description: Doover CLI

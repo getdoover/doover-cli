@@ -1,5 +1,5 @@
-doover-CHANGEME (1.0.0) focal jammy; urgency=medium
+doover-cli (0.1.0) focal jammy; urgency=medium
 
-  * CHANGEME - Put something intelligent here
+  * Initial release of CLI
 
  -- Joshua Bramley <josh@span-eng.com>  Tue, 26 Nov 2024 12:28:56 +1000

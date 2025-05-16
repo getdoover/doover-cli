@@ -1,9 +1,5 @@
 #!/usr/bin/make -f
+export PYBUILD_NAME = doover
 
 %:
-	dh $@
-
-# Force xz compression so the package is installable on Debian in case we're
-# building on an Ubuntu host.
-override_dh_builddeb:
-	dh_builddeb -- -Zxz
+	dh $@ --with python3 --buildsystem=pybuild
