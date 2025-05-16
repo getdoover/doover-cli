@@ -18,21 +18,23 @@ jobs:
   build:
     name: Build Debian package
     runs-on: ubuntu-22.04
-    container:
-      image: spaneng/doover-apt-cicd-base:latest
 
     steps:
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-region: ${{ vars.AWS_DEFAULT_REGION }}
-          role-to-assume: ${{ vars.AWS_APT_DEPLOY_ROLE_ARN }}
+      - name: Install dependencies
+        run: |
+          apt update && apt install -y \
+            build-essential \
+            git-buildpackage \
+            debhelper \
+            equivs \
+            dh-exec \
+            curl \
 
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: |
           cd /tmp/
-          echo 'y' | mk-build-deps -i ${GITHUB_WORKSPACE}/debian/control
+          echo 'y' | sudo mk-build-deps -i ${GITHUB_WORKSPACE}/debian/control
 
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
