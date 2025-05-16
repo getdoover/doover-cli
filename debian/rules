@@ -1,4 +1,5 @@
-#!/usr/bin/make -f
+#! /usr/bin/make -f
+
 export PYBUILD_NAME = doover
 
 %:
