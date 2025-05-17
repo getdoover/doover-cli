@@ -4,8 +4,12 @@ Priority: extra
 Maintainer: Doover Team <developers@doover.com>
 Build-Depends: debhelper-compat (= 13),
                dh-python,
-               python3-all,
                python3-setuptools
+               pybuild-plugin-pyproject,
+               python3-all-dev,
+               python3-hatchling,
+               python3-setuptools,
+
 Standards-Version: 4.7.0
 Homepage: https://doover.com
 

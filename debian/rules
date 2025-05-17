@@ -1,6 +1,9 @@
 #! /usr/bin/make -f
 
 export PYBUILD_NAME=doover
+export PYBUILD_BUILD_ARGS=--verbose
+export HATCH_BUILD_HOOKS_ENABLE=1
+export HATCH_VERBOSE=3
 
 %:
 	dh $@ --with python3 --buildsystem=pybuild
