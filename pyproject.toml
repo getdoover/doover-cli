@@ -10,13 +10,15 @@ dependencies = [
     "typer>=0.15.4",
 ]
 
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+#requires = ["hatchling"]
+#build-backend = "hatchling.build"
 
 [project.scripts]
 doover = "doover_cli:main"
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
 
 [tool.uv.sources]
 pydoover = { git = "https://github.com/spaneng/pydoover", rev = "9a169a85" }
