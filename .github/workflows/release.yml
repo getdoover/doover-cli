@@ -20,6 +20,12 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.AWS_DEFAULT_REGION }}
+          role-to-assume: ${{ vars.AWS_APT_DEPLOY_ROLE_ARN }}
+
       - name: Install dependencies
         run: |
           sudo apt update && sudo apt install -y \
