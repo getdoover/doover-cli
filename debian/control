@@ -9,7 +9,8 @@ Build-Depends: debhelper-compat (= 13),
                python3-hatchling,
                python3-setuptools,
                python3-requests,
-               python3-typer,
+               typer,
+               doover-pydoover,
                python3-paramiko
 Standards-Version: 4.7.0
 Homepage: https://doover.com
