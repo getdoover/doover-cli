@@ -33,13 +33,13 @@ jobs:
       - name: Install dependencies
         run: |
           cd /tmp
-          sudo apt update
-          echo 'y' | sudo mk-build-deps -i ${GITHUB_WORKSPACE}/debian/control
+          apt update
+          echo 'y' | mk-build-deps -i ${GITHUB_WORKSPACE}/debian/control
 
       - name: Build package
         run: |          
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          sudo apt show typer
+          apt show typer
 
           gbp buildpackage \
             --git-ignore-branch \
