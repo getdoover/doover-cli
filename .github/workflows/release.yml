@@ -39,6 +39,7 @@ jobs:
       - name: Build package
         run: |          
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          sudo apt show typer
 
           gbp buildpackage \
             --git-ignore-branch \
