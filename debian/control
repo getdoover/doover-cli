@@ -8,7 +8,6 @@ Build-Depends: debhelper-compat (= 13),
                pybuild-plugin-pyproject,
                python3-hatchling,
                python3-setuptools,
-               python3-paramiko,
                python3-pydoover,
                python3-requests,
                python3-typer
@@ -19,4 +18,5 @@ Package: doover-cli
 Description: Doover CLI
 Architecture: all
 Depends: ${python3:Depends},
-         ${misc:Depends}
+         ${misc:Depends},
+         python3-paramiko

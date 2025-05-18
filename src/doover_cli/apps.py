@@ -170,10 +170,15 @@ def run(
         except ConnectionRefusedError:
             typer.confirm("Connection refused. Do you want me to try and disable the firewall?", default=True, abort=True)
 
+            try:
+                from paramiko import SSHClient
+            except ImportError:
+                raise ImportError("paramiko not found. Please install it with pip install paramiko")
+
+
             username = typer.prompt(f"Please enter the username for {remote}:", default="doovit")
             password = typer.prompt("Please enter the password (skip for SSH keys):", default="doovit", hide_input=True)
 
-            from paramiko import SSHClient
             client = SSHClient()
             client.load_system_host_keys()
             client.connect(remote, username=username, password=password)
