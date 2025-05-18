@@ -33,7 +33,8 @@ jobs:
       - name: Install dependencies
         run: |
           cd /tmp
-          echo 'y' | mk-build-deps -i ${GITHUB_WORKSPACE}/debian/control
+          sudo apt update
+          echo 'y' | sudo mk-build-deps -i ${GITHUB_WORKSPACE}/debian/control
 
       - name: Build package
         run: |          
