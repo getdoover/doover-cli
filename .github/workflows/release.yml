@@ -33,7 +33,7 @@ jobs:
       - name: Install dependencies
         run: |
           cd /tmp
-          DEBIAN_FRONTEND=noninteractive mk-build-deps -i ${GITHUB_WORKSPACE}/debian/control
+          echo 'y' | mk-build-deps -i ${GITHUB_WORKSPACE}/debian/control
 
       - name: Build package
         run: |          
