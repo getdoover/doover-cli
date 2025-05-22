@@ -1,6 +1,6 @@
-import typer
+from typer import Typer
 
-app = typer.Typer()
+app = Typer(no_args_is_help=True)
 
 @app.command()
 def create():

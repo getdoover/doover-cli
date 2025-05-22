@@ -14,6 +14,8 @@ from typing_extensions import Annotated
 import requests
 import typer
 
+from doover_cli.utils.apps import get_app_directory, call_with_uv
+
 CHANNEL_VIEWER = "https://my.d.doover.com/channels/dda"
 TEMPLATE_REPO = "https://api.github.com/repos/getdoover/app-template/tarball/main"
 AUTH_TOKEN = "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"
@@ -22,7 +24,7 @@ VALID_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9-_]+$")
 IP_PATTERN = re.compile(r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
 HOSTNAME_PATTERN = re.compile(r"(?P<host>[a-zA-Z0-9-_]?)-?(?P<serial>[0-9a-zA-Z]{6})")
 
-app = typer.Typer()
+app = typer.Typer(no_args_is_help=True)
 
 class AppType(Enum):
     DEVICE = "device"
@@ -134,19 +136,7 @@ def run(
     port: int = 2375
 ):
     """Runs an application. This assumes you have a docker-compose file in the `simulator` directory."""
-    root_fp = pathlib.Path()
-    while not (root_fp / "doover_config.json").exists():
-        if root_fp == pathlib.Path("/"):
-            raise FileNotFoundError("doover_config.json not found. Please run this command from the application directory.")
-
-        res = list(root_fp.rglob("doover_config.json"))
-        if len(res) > 1:
-            raise ValueError("Multiple doover_config.json files found. Please navigate to the correct application directory.")
-        elif len(res) == 0:
-            root_fp = root_fp.parent
-        else:
-            root_fp = res[0].parent
-            break
+    root_fp = get_app_directory()
 
     print(f"Running application from {root_fp}")
     if not (root_fp / "simulators" / "docker-compose.yml").exists():
@@ -226,21 +216,13 @@ def channels(host: str = "localhost", port: int = 49100):
 @app.command()
 def test():
     """Run tests on the application. This uses pytest and requires uv to be installed."""
-    uv_path = Path.home() / ".local" / "bin"/ "uv"
-    if not uv_path.exists():
-        raise RuntimeError("uv not found in your PATH. Please install it and try again.")
-
-    os.execl(str(uv_path.absolute()), "uv", "run", "pytest")
+    call_with_uv("pytest")
 
 @app.command()
 def lint(fix: Annotated[bool, typer.Option()] = False):
     """Run linter on the application. This uses ruff and requires uv to be installed."""
-    uv_path = Path.home() / ".local" / "bin"/ "uv"
-    if not uv_path.exists():
-        raise RuntimeError("uv not found in your PATH. Please install it and try again.")
-
     args = ["ruff", "check"]
     if fix:
         args.append("--fix")
 
-    os.execl(str(uv_path.absolute()), "uv", "run", *args)
+    call_with_uv(*args)

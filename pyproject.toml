@@ -4,15 +4,16 @@ version = "0.1.0"
 description = "CLI for Doover"
 requires-python = ">=3.11"
 dependencies = [
+    "jsf>=0.11.2",
     "paramiko>=3.5.1",
     "pydoover",
+    "pytz>=2025.2",
     "requests>=2.32.3",
     "typer==0.15.1",
+    "tzlocal>=5.3.1",
 ]
 
 [build-system]
-#requires = ["setuptools>=61.0"]
-#build-backend = "setuptools.build_meta"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
@@ -21,4 +22,4 @@ doover = "doover_cli:main"
 
 
 [tool.uv.sources]
-pydoover = { git = "https://github.com/spaneng/pydoover", rev = "9a169a85" }
+pydoover = { git = "https://spaneng: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@github.com/spaneng/pydoover", rev = "31fe546" }
