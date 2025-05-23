@@ -3,18 +3,18 @@ import os
 import shutil
 from datetime import timezone, datetime, timedelta
 
+import typer
 from typing_extensions import Annotated
 
 from typer import Argument, Typer
 
-from .utils.context import Context
+from .utils.state import state
 
 app = Typer(no_args_is_help=True)
 
 
 @app.command()
 def compose_report(
-    ctx: Context,
     period_from: Annotated[
         datetime, Argument(help="Start of the period to report on")
     ] = datetime.now() - timedelta(days=7),
@@ -60,8 +60,8 @@ def compose_report(
 
     # Define additional parameters for instantiation.
     tmp_workspace = "/tmp/doover_report_output/"  # Adjust as needed
-    access_token = ctx.config_manager.current.token  # Provide valid access token
-    api_endpoint = ctx.config_manager.current.base_url  # Provide valid endpoint
+    access_token = state.config_manager.current.token  # Provide valid access token
+    api_endpoint = state.config_manager.current.base_url  # Provide valid endpoint
     report_name = "Local Report"
     test_mode = False  # Set as needed
 
@@ -95,6 +95,11 @@ def compose_report(
     )
 
     # Invoke the report generation.
-    report_instance.generate()
+    try:
+        report_instance.generate()
+    except Exception as e:
+        print(f"Error during report generation: {e}")
+        raise typer.Exit(code=1)
+
     print("Report composed successfully!")
     print(f"Output saved to: {tmp_workspace}")

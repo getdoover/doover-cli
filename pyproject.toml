@@ -1,6 +1,6 @@
 [project]
 name = "doover-cli"
-version = "0.1.2"
+version = "0.1.3a"
 description = "CLI for Doover"
 requires-python = ">=3.11"
 dependencies = [
@@ -12,6 +12,7 @@ dependencies = [
     "requests>=2.32.3",
     "typer==0.15.1",
     "tzlocal>=5.3.1",
+    "xlsxwriter>=3.2.3",
 ]
 
 [build-system]

@@ -5,7 +5,6 @@ from pathlib import Path
 from typer import Argument, Typer
 from typing_extensions import Annotated
 
-from .utils.context import Context
 from .utils.state import state
 
 app = Typer(no_args_is_help=True)
@@ -13,7 +12,6 @@ app = Typer(no_args_is_help=True)
 
 @app.command()
 def deploy(
-    ctx: Context,
     config_file: Annotated[
         Path,
         Argument(
@@ -36,7 +34,9 @@ def deploy(
     proc_deploy_data = data.get("processor_deployments")
     if proc_deploy_data:
         for processor_data in proc_deploy_data.get("processors", []):
-            processor = state.api.create_processor(processor_data["name"], state.agent_id)
+            processor = state.api.create_processor(
+                processor_data["name"], state.agent_id
+            )
             processor.update_from_package(
                 os.path.join(parent_dir, processor_data["processor_package_dir"])
             )
@@ -49,7 +49,9 @@ def deploy(
             processor = state.api.get_channel_named(
                 task_data["processor_name"], state.agent_id
             )
-            task = state.api.create_task(task_data["name"], state.agent_id, processor.id)
+            task = state.api.create_task(
+                task_data["name"], state.agent_id, processor.id
+            )
             task.publish(task_data["task_config"])
             print(f"Created or updated task {task.name}, and deployed new config.")
 

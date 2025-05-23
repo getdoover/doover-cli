@@ -5,7 +5,6 @@ from getpass import getpass
 from pydoover.cloud.api import Forbidden, NotFound
 from typer import Typer
 
-from .utils.context import Context
 from .utils.api import setup_api
 from .utils.config import ConfigEntry, NotSet
 from .utils.state import state
@@ -14,7 +13,7 @@ app = Typer(no_args_is_help=True)
 
 
 @app.command()
-def login(ctx: Context):
+def login():
     """Login to your doover account with a username / password"""
     username = input("Please enter your username: ").strip()
     password = getpass("Please enter your password: ").strip()
@@ -24,7 +23,7 @@ def login(ctx: Context):
     ).strip()
     profile = profile_name if profile_name != "" else "default"
 
-    ctx.config_manager.create(
+    state.config_manager.create(
         ConfigEntry(
             profile,
             username=username,
@@ -32,7 +31,7 @@ def login(ctx: Context):
             base_url=base_url,
         )
     )
-    ctx.config_manager.current_profile = profile
+    state.config_manager.current_profile = profile
 
     try:
         setup_api(None, state.config_manager, read=False)
@@ -43,18 +42,17 @@ def login(ctx: Context):
             traceback.print_exc()
         return login()
 
-    ctx.config_manager.write()
+    state.config_manager.write()
     print("Login successful.")
 
 
 @app.command()
-def configure_token(ctx: Context):
+def configure_token():
     """Configure your doover credentials with a long-lived token"""
-    configure_token_impl(ctx)
+    configure_token_impl()
 
 
 def configure_token_impl(
-    ctx: Context,
     token: str = None,
     agent_id: str = None,
     base_url: str = None,
@@ -91,7 +89,7 @@ def configure_token_impl(
     profile_name = input("Please enter this profile's name [default]: ")
     profile = profile_name or "default"
 
-    if profile in ctx.config_manager.entries and not overwrite:
+    if profile in state.config_manager.entries and not overwrite:
         p = input(
             "There's already a config entry with this profile. Do you want to overwrite it? [y/N]"
         )
@@ -99,7 +97,7 @@ def configure_token_impl(
             print("Exitting...")
             return
 
-    ctx.config_manager.create(
+    state.config_manager.create(
         ConfigEntry(
             profile,
             token=token,
@@ -108,24 +106,24 @@ def configure_token_impl(
             agent_id=agent_id,
         )
     )
-    ctx.config_manager.current_profile = profile
+    state.config_manager.current_profile = profile
 
-    setup_api(state.agent_id, ctx.config_manager, read=False)
+    setup_api(state.agent_id, state.config_manager, read=False)
     try:
         state.api.get_agent(state.agent_id)
     except Forbidden:
         print("Agent token was incorrect. Please try again.")
         return configure_token_impl(
-            ctx, agent_id=agent_id, base_url=base_url, expiry=expiry, overwrite=True
+            agent_id=agent_id, base_url=base_url, expiry=expiry, overwrite=True
         )
     except NotFound:
         print("Agent ID or Base URL was incorrect. Please try again.")
-        return configure_token_impl(ctx, token=token, expiry=expiry, overwrite=True)
+        return configure_token_impl(token=token, expiry=expiry, overwrite=True)
     except Exception:
         print("Base URL was incorrect. Please try again.")
         return configure_token_impl(
-            ctx, token=token, agent_id=agent_id, expiry=expiry, overwrite=True
+            token=token, agent_id=agent_id, expiry=expiry, overwrite=True
         )
     else:
-        ctx.config_manager.write()
+        state.config_manager.write()
         print("Successfully configured doover credentials.")

@@ -5,14 +5,12 @@ from typer import Typer
 
 from .utils.misc import get_ip
 from .utils.misc import choose
-from .utils.context import Context
 from .utils.state import state
 
 app = Typer(no_args_is_help=True)
 
 
 def create_tunnel(
-    ctx: Context,
     hostname: str,
     port: int,
     protocol: str,
@@ -65,7 +63,7 @@ def create_tunnel(
     return tunnel
 
 
-def wait_activate_tunnel(ctx: Context, tunnel_id, wait_for_open: bool = True):
+def wait_activate_tunnel(tunnel_id, wait_for_open: bool = True):
     state.api.activate_tunnel(tunnel_id)
     print(f"Activated tunnel {tunnel_id}.")
 
@@ -80,9 +78,7 @@ def wait_activate_tunnel(ctx: Context, tunnel_id, wait_for_open: bool = True):
             time.sleep(1)
 
 
-def activate_deactivate_tunnel(
-    ctx: Context, tunnel_id: str = None, activate: bool = True
-):
+def activate_deactivate_tunnel(tunnel_id: str = None, activate: bool = True):
     action = state.api.activate_tunnel if activate else state.api.deactivate_tunnel
     action_word = "activate" if activate else "deactivate"
 
@@ -106,7 +102,7 @@ def activate_deactivate_tunnel(
 
 
 @app.command()
-def get(ctx: Context):
+def get():
     """Get tunnels for an agent"""
     tunnels = state.api.get_tunnels(state.agent_id)
     for tunnel in tunnels["tunnels"]:
@@ -116,20 +112,19 @@ def get(ctx: Context):
 
 
 @app.command()
-def activate(ctx: Context, tunnel_id: str = None):
+def activate(tunnel_id: str = None):
     """Activate a tunnel"""
-    activate_deactivate_tunnel(ctx, tunnel_id, activate=True)
+    activate_deactivate_tunnel(tunnel_id, activate=True)
 
 
 @app.command()
-def deactivate(ctx: Context, tunnel_id: str = None):
+def deactivate(tunnel_id: str = None):
     """Deactivate a tunnel"""
-    activate_deactivate_tunnel(ctx, tunnel_id, activate=False)
+    activate_deactivate_tunnel(tunnel_id, activate=False)
 
 
 @app.command(name="open")
 def open_(
-    ctx: Context,
     address: str,
     protocol: str = "http",
     timeout: int = 15,
@@ -137,16 +132,16 @@ def open_(
 ):
     """Open an arbitrary tunnel for a doover agent"""
     host, port = address.split(":")
-    create_tunnel(ctx, host, int(port), protocol, timeout, restrict_cidr)
+    create_tunnel(host, int(port), protocol, timeout, restrict_cidr)
 
 
 @app.command()
-def open_ssh(ctx: Context, timeout: int = 15, restrict_cidr: bool = True):
+def open_ssh(timeout: int = 15, restrict_cidr: bool = True):
     """Open an SSH tunnel for a doover agent"""
-    tunnel = create_tunnel(ctx, "127.0.0.1", 22, "tcp", timeout, restrict_cidr)
+    tunnel = create_tunnel("127.0.0.1", 22, "tcp", timeout, restrict_cidr)
     print(tunnel)
     if not tunnel["is_active"]:
-        wait_activate_tunnel(ctx, tunnel["key"], True)
+        wait_activate_tunnel(tunnel["key"], True)
 
     host, port = tunnel["endpoint"].split(":")
 
@@ -159,7 +154,7 @@ def open_ssh(ctx: Context, timeout: int = 15, restrict_cidr: bool = True):
 
 
 @app.command()
-def close_all(ctx: Context):
+def close_all():
     """Close all tunnels for a doover agent"""
     channel = state.api.get_channel_named("tunnels", state.agent_id)
     channel.publish({"to_close": channel.aggregate["open"]})

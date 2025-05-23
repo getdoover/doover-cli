@@ -11,16 +11,13 @@ from typer import Argument, Option, Typer
 
 from doover_cli.utils import parsers
 from doover_cli.utils.formatters import format_channel_info
-from .utils.context import Context
 from .utils.state import state
 
 app = Typer(no_args_is_help=True)
 
 
 @app.command()
-def get(
-    ctx: Context, channel_name: Annotated[str, Argument(help="Channel name to get info for")]
-):
+def get(channel_name: Annotated[str, Argument(help="Channel name to get info for")]):
     """Get channel info"""
     try:
         channel = state.api.get_channel(channel_name)
@@ -32,9 +29,7 @@ def get(
 
 
 @app.command()
-def create(
-    ctx: Context, channel_name: Annotated[str, Argument(help="Channel name to create")]
-):
+def create(channel_name: Annotated[str, Argument(help="Channel name to create")]):
     """Create new channel"""
     channel = state.api.create_channel(channel_name, state.agent_id)
     print(f"Channel created successfully. ID: {channel.id}")
@@ -43,7 +38,6 @@ def create(
 
 @app.command()
 def create_task(
-    ctx: Context,
     task_name: Annotated[
         str, Argument(parser=parsers.task_name, help="Task channel name to create.")
     ],
@@ -81,7 +75,6 @@ def run_for_single_message(
 
 @app.command()
 def invoke_local_task(
-    ctx: Context,
     task_name: Annotated[
         str, Argument(parser=parsers.task_name, help="Task channel name to create.")
     ],
@@ -165,7 +158,6 @@ def invoke_local_task(
 
 @app.command()
 def create_processor(
-    ctx: Context,
     processor_name: Annotated[
         str, Argument(parser=parsers.processor_name, help="Processor name.")
     ],
@@ -178,7 +170,6 @@ def create_processor(
 
 @app.command()
 def publish(
-    ctx: Context,
     channel_name: Annotated[str, Argument(help="Channel name to publish to")],
     message: Annotated[
         str, Argument(help="Message to publish", parser=parsers.maybe_json)
@@ -200,7 +191,6 @@ def publish(
 
 @app.command()
 def publish_file(
-    ctx: Context,
     channel_name: Annotated[str, Argument(help="Channel name to publish to")],
     file_path: Annotated[Path, Argument(help="Path to the file to publish")],
 ):
@@ -221,7 +211,6 @@ def publish_file(
 
 @app.command()
 def publish_processor(
-    ctx: Context,
     processor_name: Annotated[
         str,
         Argument(
@@ -251,7 +240,6 @@ def publish_processor(
 
 @app.command()
 def follow(
-    ctx: Context,
     channel_name: Annotated[str, Argument(help="Channel name to publish to")],
     poll_rate: Annotated[
         int, Argument(help="Frequency to check for new messages (in seconds)")
@@ -272,7 +260,6 @@ def follow(
 
 @app.command()
 def subscribe(
-    ctx: Context,
     task_name: Annotated[
         str,
         Argument(help="Task name to add the subscription to", parser=parsers.task_name),
@@ -294,7 +281,6 @@ def subscribe(
 
 @app.command()
 def unsubscribe(
-    ctx: Context,
     task_name: Annotated[
         str,
         Argument(
