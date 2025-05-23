@@ -51,10 +51,11 @@ def validate(
             jsonschema.validate(instance={}, schema=schema)
         except jsonschema.exceptions.SchemaError as e:
             raise e
-        except jsonschema.exceptions.ValidationError as e:
+        except jsonschema.exceptions.ValidationError:
             pass
 
         print(f"Schema for {k} is valid.")
+
 
 @app.command()
 def generate(
@@ -63,7 +64,7 @@ def generate(
     ] = Path(),
     output_fp: Annotated[
         Path, typer.Argument(help="Path to the output directory.")
-    ] = None
+    ] = None,
 ):
     """Generate a sample config for an application. This uses default values and sample values where possible."""
     root_fp = get_app_directory(app_fp)

@@ -51,7 +51,7 @@ def bool_or_list(data: str):
     else:
         try:
             data_eval = ast.literal_eval(data)
-        except:
+        except (ValueError, TypeError):
             raise TypeError(f"Inputted {data} is not a list of int or a single int")
         if not isinstance(data_eval, bool):
             raise TypeError(f"Inputted {data} is not a list of int or a single int")
@@ -73,7 +73,7 @@ def float_or_list(data: str):
 def json_or_str(data: str):
     try:
         return json.dumps(data)
-    except:
+    except json.JSONDecodeError:
         return str
 
 

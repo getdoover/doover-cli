@@ -6,11 +6,12 @@ from pydoover.cloud.api import Forbidden, NotFound
 from typer import Typer
 
 from .utils.context import Context
-from .utils import setup_api
+from .utils.api import setup_api
 from .utils.config import ConfigEntry, NotSet
 from .utils.state import state
 
 app = Typer(no_args_is_help=True)
+
 
 @app.command()
 def login(ctx: Context):
@@ -34,11 +35,11 @@ def login(ctx: Context):
     ctx.config_manager.current_profile = profile
 
     try:
-        setup_api(None, ctx.config_manager, read=False)
+        setup_api(None, state.config_manager, read=False)
         # self.api.login()
     except Exception:
         print("Login failed. Please try again.")
-        if ctx.debug:
+        if state.debug:
             traceback.print_exc()
         return login()
 

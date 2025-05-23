@@ -20,6 +20,11 @@ build-backend = "hatchling.build"
 [project.scripts]
 doover = "doover_cli:main"
 
-
 [tool.uv.sources]
 pydoover = { git = "https://spaneng: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@github.com/spaneng/pydoover", rev = "31fe546" }
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.2.0",
+    "pytest>=8.3.5",
+]

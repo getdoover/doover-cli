@@ -3,7 +3,7 @@ import time
 
 from typer import Typer
 
-from .utils import get_ip
+from .utils.misc import get_ip
 from .utils.misc import choose
 from .utils.context import Context
 from .utils.state import state
@@ -80,7 +80,9 @@ def wait_activate_tunnel(ctx: Context, tunnel_id, wait_for_open: bool = True):
             time.sleep(1)
 
 
-def activate_deactivate_tunnel(ctx: Context, tunnel_id: str = None, activate: bool = True):
+def activate_deactivate_tunnel(
+    ctx: Context, tunnel_id: str = None, activate: bool = True
+):
     action = state.api.activate_tunnel if activate else state.api.deactivate_tunnel
     action_word = "activate" if activate else "deactivate"
 
@@ -124,6 +126,7 @@ def deactivate(ctx: Context, tunnel_id: str = None):
     """Deactivate a tunnel"""
     activate_deactivate_tunnel(ctx, tunnel_id, activate=False)
 
+
 @app.command(name="open")
 def open_(
     ctx: Context,
@@ -153,7 +156,6 @@ def open_ssh(ctx: Context, timeout: int = 15, restrict_cidr: bool = True):
         f"Opening SSH session with host: {host}, port: {port}, username: {username}..."
     )
     os.execl("/usr/bin/ssh", "ssh", f"{username}@{host}", "-p", port)
-
 
 
 @app.command()

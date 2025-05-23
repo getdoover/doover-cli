@@ -7,7 +7,6 @@ from typing_extensions import Annotated
 
 from typer import Argument, Typer
 
-from .utils.state import state
 from .utils.context import Context
 
 app = Typer(no_args_is_help=True)
