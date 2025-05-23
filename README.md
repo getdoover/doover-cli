@@ -56,7 +56,7 @@ doover --help
 
 
 # Contributing
-See [CONTRIBUTING.md](CONTRIBUTING.md) for more information on how to contribute to this project.
+See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for more information on how to contribute to this project.
 
 # License
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
