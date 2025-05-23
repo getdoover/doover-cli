@@ -5,6 +5,30 @@ generate, test, lint, run and deploy new applications and more.
 
 ## Installation
 
+If you don't have `uv` installed, it is suggested to install that first:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+## With UV / Pip
+
+In order of preference (choose one):
+
+```bash
+uv tool install doover-cli
+```
+
+```bash
+pipx install doover-cli
+```
+
+```bash
+pip install doover-cli
+```
+
+
+## Linux / Debian
+
 Make sure you have the doover apt repository added to your system:
 ```bash
 sudo wget http://apt.u.doover.com/install.sh -O - | sh
@@ -15,10 +39,13 @@ And then install the package with:
 sudo apt install doover-cli
 ```
 
-If you don't have `uv` installed, it is suggested to install that as well:
+## MacOS / Homebrew
+
+If you don't have `brew` installed, it is suggested to install that first:
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
+
+
 
 ## Usage
 
