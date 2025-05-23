@@ -9,17 +9,6 @@ body:
         A short summary of what your feature request is.
     validations:
       required: true
-  - type: dropdown
-    attributes:
-      multiple: false
-      label: What is the feature request for?
-      options:
-        - The core library
-        - discord.ext.commands
-        - discord.ext.tasks
-        - The documentation
-    validations:
-      required: true
   - type: textarea
     attributes:
       label: The Problem
