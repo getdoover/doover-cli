@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import pathlib
@@ -9,14 +10,22 @@ import subprocess
 from urllib.parse import urlencode
 from pathlib import Path
 from enum import Enum
+
+from pydoover.cloud.api import HTTPException
 from typing_extensions import Annotated
 
 import requests
 import typer
+import questionary
 
-from .utils.apps import get_app_directory, call_with_uv
+from docker.errors import ImageNotFound
 
-CHANNEL_VIEWER = "https://my.d.doover.com/channels/dda"
+from .utils.apps import get_app_directory, call_with_uv, get_docker_path, get_app_config
+from .utils.prompt import QuestionaryPromptCommand
+from .utils.state import state
+from .utils.shell_commands import run as shell_run
+
+CHANNEL_VIEWER = "https://my.doover.com/channels/dda"
 TEMPLATE_REPO = "https://api.github.com/repos/getdoover/app-template/tarball/main"
 AUTH_TOKEN = "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"
 
@@ -39,6 +48,13 @@ class SimulatorType(Enum):
     CHANNELS = "channels"
 
 
+class ContainerRegistry(Enum):
+    GITHUB_INT = "ghcr.io/getdoover"
+    GITHUB_OTHER = "ghcr.io/other"
+    DOCKERHUB_INT = "DockerHub (spaneng)"
+    DOCKERHUB_OTHER = "DockerHub (other)"
+
+
 def extract_archive(archive_path: pathlib.Path):
     """Extract an archive (tar, gz, zip) to a temporary directory and return the path to the extracted directory.
 
@@ -57,7 +73,7 @@ def extract_archive(archive_path: pathlib.Path):
     return extract_path
 
 
-@app.command()
+@app.command(cls=QuestionaryPromptCommand)
 def create(
     name: Annotated[str, typer.Option(prompt="What is the name of your app?")],
     description: Annotated[
@@ -66,14 +82,33 @@ def create(
             prompt="Description (tell me a little about your app - what does it do?)"
         ),
     ],
-    type_: Annotated[AppType, typer.Option(prompt=True)] = AppType.DEVICE.value,
-    simulator: Annotated[
-        SimulatorType, typer.Option(prompt=True)
-    ] = SimulatorType.MIXED.value,
+    # type_: Annotated[AppType, typer.Option(prompt=True)] = AppType.DEVICE.value,
+    # simulator: Annotated[
+    #     SimulatorType, typer.Option(prompt=True)
+    # ] = SimulatorType.MIXED.value,
+    git: Annotated[
+        bool, typer.Option(prompt="Would you like me to initiate a git repository?")
+    ] = True,
     cicd: Annotated[
         bool,
-        typer.Option(prompt="Do you want to enable CI/CD?", confirmation_prompt=True),
+        typer.Option(prompt="Do you want to enable CI/CD for your app?"),
     ] = True,
+    container_registry: Annotated[
+        ContainerRegistry,
+        typer.Option(prompt="What is the container registry for your app?"),
+    ] = ContainerRegistry.GITHUB_INT.value,
+    owner_org_key: Annotated[
+        str,
+        typer.Option(
+            prompt="What is the owner organisation's key (on Doover)? (leave blank if you don't know)"
+        ),
+    ] = "",
+    container_profile_key: Annotated[
+        str,
+        typer.Option(
+            prompt="What is the container registry profile key on Doover? (leave blank if you don't know)"
+        ),
+    ] = "",
 ):
     """Create an application with a walk-through wizard.
 
@@ -87,11 +122,28 @@ def create(
 
     path = Path(name_as_path)
     if path.exists():
-        typer.confirm("Path already exists. Do you want to overwrite it?", abort=True)
+        typer.confirm("Path already exists. Do you want to delete it?", abort=True)
+        typer.confirm("Are you absolutely sure? (Please double check...)", abort=True)
         shutil.rmtree(path)
 
     name_as_pascal_case = "".join(word.capitalize() for word in name_as_path.split("-"))
     name_as_snake_case = "_".join(name_as_path.split("-"))
+
+    if container_registry is ContainerRegistry.GITHUB_OTHER:
+        resp = questionary.text(
+            "You selected an 'other' GitHub Packages registry. "
+            "Please enter your GitHub organisation name, or GitHub username:"
+        ).unsafe_ask()
+        container_registry = f"ghcr.io/{resp}"
+    elif container_registry is ContainerRegistry.DOCKERHUB_OTHER:
+        container_registry = questionary.text(
+            "You selected an 'other' DockerHub repository. "
+            "Please enter the repository name (e.g spaneng):"
+        ).unsafe_ask()
+    elif container_registry is ContainerRegistry.DOCKERHUB_INT:
+        container_registry = "spaneng"
+    else:
+        container_registry = container_registry.value
 
     print("Fetching template repository...")
     data = requests.get(
@@ -105,9 +157,10 @@ def create(
     # Extract the tarball
     extracted_path = extract_archive(tmp_path)
     shutil.move(extracted_path, path)
+    shutil.move(path / "src" / "app_template", path / "src" / name_as_snake_case)
 
     print("Renaming template files...")
-    for file in path.rglob("*.py"):
+    for file in (path / "pyproject.toml", path / "README.md", *path.rglob("*.py")):
         file: pathlib.Path
         try:
             contents: str = file.read_text()
@@ -121,6 +174,8 @@ def create(
             ("SampleUI", f"{name_as_pascal_case}UI"),
             ("SampleState", f"{name_as_pascal_case}State"),
             ("sample_application", name_as_snake_case),
+            ("app_template", name_as_snake_case),
+            ("app-template", name_as_path),
         ]
 
         for old, new in replacements:
@@ -130,37 +185,56 @@ def create(
 
     # write config
     print("Updating config...")
-    config_path = path / "application" / "app_config.py"
-    subprocess.run(["python", str(config_path)])
+    subprocess.run(
+        "uv run app_config.py",
+        shell=True,
+        cwd=path / "src" / name_as_snake_case,
+        capture_output=True,
+    )
 
-    content = json.loads((path / "doover_config.json").read_text())
+    config_path = path / "doover_config.json"
+    content = json.loads(config_path.read_text())
+    content[name_as_snake_case] = copy.deepcopy(content["sample_application"])
     del content["sample_application"]
-    content[str(name_as_snake_case)].update(
+    del content[name_as_snake_case]["key"]
+    content[name_as_snake_case].update(
         {
             "name": name,
             "description": description,
-            "type": type_.value,
-            "simulator": simulator.value,
+            "type": "DEV",
+            "image_name": f"{container_registry}/{name_as_snake_case}:latest",
+            "owner_org": owner_org_key or "FIX-ME",
+            "container_registry_profile": container_profile_key or "FIX-ME",
         }
     )
     config_path.write_text(json.dumps(content))
 
     if cicd is False:
-        print("Disabling CI/CD workflows")
-        shutil.move(
-            path / ".github" / "workflows", path / ".github" / "workflows_disabled"
+        print("Removing CI/CD workflows")
+        shutil.rmtree(path / ".github", ignore_errors=True)
+    if git is True:
+        # print("Initializing git repository...")
+        subprocess.run(["git", "init"], cwd=path)
+        subprocess.run(["git", "add", "."], cwd=path, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "Initial commit"], cwd=path, capture_output=True
         )
 
     print("Done!")
 
 
-@app.command()
+@app.command(
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
+)
 def run(
+    ctx: typer.Context,
     remote: str = typer.Argument(None),
-    docker_args: list[str] = typer.Argument(None),
     port: int = 2375,
 ):
-    """Runs an application. This assumes you have a docker-compose file in the `simulator` directory."""
+    """Runs an application. This assumes you have a docker-compose file in the `simulator` directory.
+
+    This accepts additional arguments to pass to the `docker compose up` command.
+    """
     root_fp = get_app_directory()
 
     print(f"Running application from {root_fp}")
@@ -169,15 +243,7 @@ def run(
             "docker-compose.yml not found. Please ensure there is a docker-compose.yml file in the simulators directory."
         )
 
-    if Path("/usr/bin/docker").exists():
-        docker_path = "/usr/bin/docker"
-    elif Path("/usr/local/bin/docker").exists():
-        docker_path = "/usr/local/bin/docker"
-    else:
-        raise RuntimeError(
-            "Couldn't find docker installation. Make sure it is installed, in your PATH and try again."
-        )
-
+    docker_path = get_docker_path()
     if remote:
         match = HOSTNAME_PATTERN.match(remote)
         if match:
@@ -220,25 +286,6 @@ def run(
     else:
         host_args = ()
 
-    if docker_args:
-        # feel free to add more
-        compose_flags = (
-            "abort-on-container-exit",
-            "abort-on-container-failure",
-            "no-recreate",
-            "remove-orphans",
-            "force-recreate",
-            "timeout",
-            "detatch",
-            "pull",
-            "quiet-pull",
-        )
-        docker_args = [
-            f"--{arg}" if arg in compose_flags else arg for arg in docker_args
-        ]
-    else:
-        docker_args = []
-
     # docker compose -f docker-compose.pump-aquamonix.yml up --build --abort-on-container-exit
     os.execl(
         docker_path,
@@ -249,23 +296,77 @@ def run(
         str(root_fp / "simulators" / "docker-compose.yml"),
         "up",
         "--build",
-        *docker_args,
+        *ctx.args,
     )
 
 
 @app.command()
-def deploy():
-    """Deploy an application."""
-    pass
+def deploy(
+    app_fp: Annotated[
+        Path, typer.Argument(help="Path to the application directory.")
+    ] = Path(),
+):
+    """Deploy an application.
+
+    This pushes a built image to the app's docker registry and updates the application on the Doover site.
+    """
+    root_fp = get_app_directory(app_fp)
+    app_config = get_app_config(root_fp)
+
+    print("Updating application on doover site...\n")
+
+    try:
+        if app_config.key is None:
+            key = state.api.create_application(app_config)
+            app_config.key = key
+            app_config.save_to_disk()
+            print(f"Created new application with key: {key}")
+        else:
+            state.api.update_application(app_config)
+    except HTTPException as e:
+        print(f"Failed to update application: {e}")
+        raise typer.Exit(1)
+
+    print("\nApp updated. Now pushing the image to the registry...\n")
+
+    import docker
+
+    client = docker.from_env()
+    try:
+        client.images.get(app_config.image_name)
+    except ImageNotFound:
+        typer.confirm(
+            f"Image not found with name: {app_config.image_name}. Do you want me to build the image first?",
+            abort=True,
+        )
+
+        shell_run(
+            f"docker build {app_config.build_args} -t {app_config.image_name} {str(root_fp)}"
+        )
+
+    shell_run(f"docker push {app_config.image_name}")
+    print("\n\nDone!")
 
 
-@app.command()
-def channels(host: str = "localhost", port: int = 49100):
-    """Open the channel viewer in your browser."""
-    import webbrowser
+@app.command(
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
+)
+def build(
+    ctx: typer.Context,
+    app_fp: Annotated[
+        Path, typer.Argument(help="Path to the application directory.")
+    ] = Path(),
+):
+    """Build an application. Accepts additional arguments to pass to the `docker build` command.
 
-    url = CHANNEL_VIEWER + "?" + urlencode({"local_url": f"http://{host}:{port}"})
-    webbrowser.open(url)
+    This uses the default `build_args` from the app config in the `doover_config.json` file.
+    """
+    root_fp = get_app_directory(app_fp)
+    config = get_app_config(root_fp)
+
+    shell_run(
+        f"docker build {config.build_args} {' '.join(ctx.args)} -t {config.image_name} {str(root_fp)}",
+    )
 
 
 @app.command()
@@ -287,3 +388,27 @@ def lint(
         args.append("--fix")
 
     call_with_uv(*args)
+
+
+@app.command(name="format")
+def format_(
+    fix: Annotated[
+        bool,
+        typer.Option(help="Make changes to fix formatting issues"),
+    ] = False,
+):
+    """Run formatter on the application. This uses ruff and requires uv to be installed."""
+    args = ["ruff", "format"]
+    if fix is False:
+        args.append("--check")
+
+    call_with_uv(*args)
+
+
+@app.command()
+def channels(host: str = "localhost", port: int = 49100):
+    """Open the channel viewer in your browser."""
+    import webbrowser
+
+    url = CHANNEL_VIEWER + "?" + urlencode({"local_url": f"http://{host}:{port}"})
+    webbrowser.open(url)
