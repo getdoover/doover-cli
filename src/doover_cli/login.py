@@ -3,11 +3,10 @@ from typing import Annotated
 
 import typer
 
-from pydoover.cloud.api import Forbidden, NotFound
+from pydoover.cloud.api import Forbidden, NotFound, ConfigEntry
 from typer import Typer
 
 from .utils.api import setup_api
-from .utils.config import ConfigEntry
 from .utils.prompt import QuestionaryPromptCommand
 from .utils.state import state
 

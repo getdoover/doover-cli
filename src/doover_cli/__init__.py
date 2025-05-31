@@ -2,6 +2,8 @@ from typing import Annotated, Optional
 
 import typer
 
+from pydoover.cloud.api import ConfigManager
+
 from .apps import app as apps_app
 from .config_schema import app as config_schema_app
 from .simulator import app as simulators_app
@@ -12,7 +14,6 @@ from .grpc import app as grpc_app
 from .login import app as login_app
 from .report import app as reports_app
 from .tunnel import app as tunnels_app
-from .utils.config import ConfigManager
 from .utils.state import state
 
 app = typer.Typer(no_args_is_help=True)

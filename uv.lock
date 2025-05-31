@@ -315,7 +315,7 @@ requires-dist = [
     { name = "docker", specifier = ">=7.1.0" },
     { name = "jsf", specifier = ">=0.11.2" },
     { name = "paramiko", specifier = ">=3.5.1" },
-    { name = "pydoover", git = "https://github.com/spaneng/pydoover?rev=0cb49275" },
+    { name = "pydoover", git = "https://github.com/spaneng/pydoover?rev=5d89334c" },
     { name = "pytz", specifier = ">=2025.2" },
     { name = "questionary", specifier = ">=1.10.0" },
     { name = "requests", specifier = ">=2.32.3" },
@@ -613,7 +613,7 @@ wheels = [
 [[package]]
 name = "pydoover"
 version = "0.4.0a0"
-source = { git = "https://github.com/spaneng/pydoover?rev=0cb49275#0cb49275d08b5203561197f90394c622761899ed" }
+source = { git = "https://github.com/spaneng/pydoover?rev=5d89334c#5d89334c47d3b6ed395200a3545ecb54337ee61c" }
 dependencies = [
     { name = "requests" },
 ]

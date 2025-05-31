@@ -4,8 +4,8 @@ import re
 from datetime import datetime, timezone
 
 from pydoover.cloud.api import Client
+from pydoover.cloud.api import ConfigManager
 
-from .config import ConfigManager
 from .misc import choose
 
 KEY_MATCH = re.compile(r"[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}")

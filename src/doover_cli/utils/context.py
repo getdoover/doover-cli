@@ -3,8 +3,7 @@ from typing import TYPE_CHECKING
 import typer
 
 if TYPE_CHECKING:
-    from pydoover.cloud.api import Client
-    from .config import ConfigManager
+    from pydoover.cloud.api import Client, ConfigManager
 
 
 class Context(typer.Context):

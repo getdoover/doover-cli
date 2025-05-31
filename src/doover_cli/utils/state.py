@@ -1,6 +1,5 @@
-from pydoover.cloud.api import Client
+from pydoover.cloud.api import Client, ConfigManager
 
-from .config import ConfigManager
 from .api import setup_api
 
 
@@ -16,7 +15,6 @@ class State:
         self.config_manager: ConfigManager | None = None
         self._api: Client | None = None
 
-
     @property
     def api(self):
         """Allows lazy loading of the API client.
@@ -29,6 +27,7 @@ class State:
             self._api, agent = setup_api(self.agent_query, self.config_manager)
             self.agent_id = self.api.agent_id
         return self._api
+
 
 # dirty big global variable but it's OK.
 state = State()
