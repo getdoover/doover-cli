@@ -8,6 +8,7 @@ from .simulator import app as simulators_app
 from .agent import app as agents_app
 from .channel import app as channels_app
 from .config import app as config_app
+from .grpc import app as grpc_app
 from .login import app as login_app
 from .report import app as reports_app
 from .tunnel import app as tunnels_app
@@ -33,6 +34,7 @@ app.add_typer(login_app)
 app.add_typer(reports_app, name="report", help="Generate and manage reports.")
 app.add_typer(tunnels_app, name="tunnel", help="Manage SSH tunnels for remote access.")
 app.add_typer(config_app, name="config", help="Manage application configurations.")
+app.add_typer(grpc_app, name="grpc", help="Interact with running gRPC servers.")
 
 
 def version_callback(value: bool):
