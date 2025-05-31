@@ -1,27 +1,33 @@
-import traceback
 from datetime import datetime, timedelta, timezone
-from getpass import getpass
+from typing import Annotated
+
+import typer
 
 from pydoover.cloud.api import Forbidden, NotFound
 from typer import Typer
 
 from .utils.api import setup_api
-from .utils.config import ConfigEntry, NotSet
+from .utils.config import ConfigEntry
+from .utils.prompt import QuestionaryPromptCommand
 from .utils.state import state
 
 app = Typer(no_args_is_help=True)
 
 
-@app.command()
-def login():
+@app.command(cls=QuestionaryPromptCommand)
+def login(
+    username: Annotated[str, typer.Option(prompt="Doover username:")],
+    password: Annotated[str, typer.Option(prompt="Doover password:", hide_input=True)],
+    base_url: Annotated[
+        str, typer.Option(prompt="Base API URL:")
+    ] = "https://my.doover.com",
+    profile_name: Annotated[str, typer.Option(prompt="Profile name:")] = "default",
+):
     """Login to your doover account with a username / password"""
-    username = input("Please enter your username: ").strip()
-    password = getpass("Please enter your password: ").strip()
-    base_url = input("Please enter the base API URL: ").strip("%").strip("/")
-    profile_name = input(
-        "Please enter this profile name (defaults to default): "
-    ).strip()
-    profile = profile_name if profile_name != "" else "default"
+    username = username.strip()
+    password = password.strip()
+    base_url = base_url.strip("%").strip("/")
+    profile = profile_name.strip()
 
     state.config_manager.create(
         ConfigEntry(
@@ -36,66 +42,56 @@ def login():
     try:
         setup_api(None, state.config_manager, read=False)
         # self.api.login()
-    except Exception:
+    except Exception as e:
         print("Login failed. Please try again.")
         if state.debug:
-            traceback.print_exc()
-        return login()
+            raise e
+        raise typer.Exit(1)
 
     state.config_manager.write()
     print("Login successful.")
 
 
-@app.command()
-def configure_token():
-    """Configure your doover credentials with a long-lived token"""
-    configure_token_impl()
-
-
-def configure_token_impl(
-    token: str = None,
-    agent_id: str = None,
-    base_url: str = None,
-    expiry=NotSet,
-    overwrite: bool = False,
+@app.command(cls=QuestionaryPromptCommand)
+def configure_token(
+    token: Annotated[
+        str, typer.Option(prompt="API Token:", help="Long-lived API token")
+    ],
+    agent_id: Annotated[
+        str, typer.Option(prompt="Agent ID:", help="Default Agent ID to use.")
+    ],
+    base_url: Annotated[
+        str, typer.Option(prompt="Base API URL:", help="Base URL for the Doover API.")
+    ] = "https://my.doover.com",
+    profile: Annotated[
+        str,
+        typer.Option(
+            prompt="Profile name:", help="Profile name to set for this token."
+        ),
+    ] = "default",
+    expiry: Annotated[
+        str,
+        typer.Option(
+            prompt="Token expiry (in days):", help="Number of days until token expires."
+        ),
+    ] = None,
 ):
-    if not token:
-        token = input("Please enter your agent token: ").strip()
-        # self.config_manager.current.token = token.strip()
-    if not agent_id:
-        agent_id = input("Please enter your Agent ID: ").strip()
-        # self.config_manager.agent_id = agent_id.strip()
-    if not base_url:
-        base_url = input("Please enter your base API url: ").strip("%").strip("/")
-        # self.config.base_url = base_url
-    if expiry is NotSet:
-        print(
-            "This token is intended to be a long-lived token."
-            "I will remind you to reconfigure the token when this expiry is exceeded."
+    """Configure your doover credentials with a long-lived token"""
+    if profile in state.config_manager.entries:
+        typer.confirm(
+            "There's already a config entry with this profile. Do you want to overwrite it?",
+            abort=True,
+            default=False,
         )
-        expiry_days = input(
-            "Please enter the number of days (approximately) until expiration: "
-        )
+
+    if expiry:
         try:
-            expiry = datetime.now(timezone.utc) + timedelta(days=int(expiry_days))
+            expiry = datetime.now(timezone.utc) + timedelta(days=int(expiry.strip()))
         except ValueError:
             print(
                 "I couldn't parse that expiry. I will set it to None which means no expiry."
             )
             expiry = None
-
-        # self.config.token_expiry = expiry
-
-    profile_name = input("Please enter this profile's name [default]: ")
-    profile = profile_name or "default"
-
-    if profile in state.config_manager.entries and not overwrite:
-        p = input(
-            "There's already a config entry with this profile. Do you want to overwrite it? [y/N]"
-        )
-        if not p.startswith("y"):
-            print("Exitting...")
-            return
 
     state.config_manager.create(
         ConfigEntry(
@@ -113,17 +109,13 @@ def configure_token_impl(
         state.api.get_agent(state.agent_id)
     except Forbidden:
         print("Agent token was incorrect. Please try again.")
-        return configure_token_impl(
-            agent_id=agent_id, base_url=base_url, expiry=expiry, overwrite=True
-        )
+        raise typer.Exit(1)
     except NotFound:
         print("Agent ID or Base URL was incorrect. Please try again.")
-        return configure_token_impl(token=token, expiry=expiry, overwrite=True)
+        raise typer.Exit(1)
     except Exception:
         print("Base URL was incorrect. Please try again.")
-        return configure_token_impl(
-            token=token, agent_id=agent_id, expiry=expiry, overwrite=True
-        )
+        raise typer.Exit(1)
     else:
         state.config_manager.write()
         print("Successfully configured doover credentials.")

@@ -1,6 +1,7 @@
 import time
 from pathlib import Path
 
+import typer
 from pydoover.cloud.api.channel import Task, Processor
 from typing_extensions import Annotated
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -22,8 +23,13 @@ def get(channel_name: Annotated[str, Argument(help="Channel name to get info for
     try:
         channel = state.api.get_channel(channel_name)
     except NotFound:
-        print(channel_name, state.agent_id)
-        channel = state.api.get_channel_named(channel_name, state.agent_id)
+        try:
+            channel = state.api.get_channel_named(channel_name, state.agent_id)
+        except NotFound as e:
+            print("Channel not found. Is it owned by this agent?")
+            if state.debug:
+                raise e
+            raise typer.Exit(1)
 
     print(format_channel_info(channel))
 

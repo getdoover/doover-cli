@@ -25,6 +25,15 @@ class QuestionaryPrompt(click.Option):
                     default=self.get_default(ctx),
                 ).unsafe_ask()
         if isinstance(self.type, click.types.StringParamType):
+            if self.hide_input is True:
+                return questionary.password(
+                    self.prompt,
+                    default=str(
+                        self.get_default(ctx)
+                        if self.get_default(ctx) is not None
+                        else ""
+                    ),
+                ).unsafe_ask()
             return questionary.text(
                 self.prompt,
                 default=str(

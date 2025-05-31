@@ -11,6 +11,7 @@ from urllib.parse import urlencode
 from pathlib import Path
 from enum import Enum
 
+import rich
 from pydoover.cloud.api import HTTPException
 from typing_extensions import Annotated
 
@@ -89,10 +90,10 @@ def create(
     git: Annotated[
         bool, typer.Option(prompt="Would you like me to initiate a git repository?")
     ] = True,
-    cicd: Annotated[
-        bool,
-        typer.Option(prompt="Do you want to enable CI/CD for your app?"),
-    ] = True,
+    # cicd: Annotated[
+    #     bool,
+    #     typer.Option(prompt="Do you want to enable CI/CD for your app?"),
+    # ] = True,
     container_registry: Annotated[
         ContainerRegistry,
         typer.Option(prompt="What is the container registry for your app?"),
@@ -199,7 +200,8 @@ def create(
     del content[name_as_snake_case]["key"]
     content[name_as_snake_case].update(
         {
-            "name": name,
+            "name": name_as_path,
+            "display_name": name,
             "description": description,
             "type": "DEV",
             "image_name": f"{container_registry}/{name_as_snake_case}:latest",
@@ -209,9 +211,6 @@ def create(
     )
     config_path.write_text(json.dumps(content))
 
-    if cicd is False:
-        print("Removing CI/CD workflows")
-        shutil.rmtree(path / ".github", ignore_errors=True)
     if git is True:
         # print("Initializing git repository...")
         subprocess.run(["git", "init"], cwd=path)
@@ -219,8 +218,22 @@ def create(
         subprocess.run(
             ["git", "commit", "-m", "Initial commit"], cwd=path, capture_output=True
         )
+        rich.print(
+            "You can now push your app to GitHub or another git provider. "
+            "If using GitHub, try [blue]gh repo create[/blue] to create the repo in the CLI.\n"
+            "If you want to push your app to a different git provider, or create the repository manually at github.com, you can add the repository like so:\n"
+            "[blue]git remote add origin <url>[/blue]\n"
+            "[blue]git push -u origin main[/blue]"
+        )
 
-    print("Done!")
+    else:
+        # if cicd is False:
+        print("Removing CI/CD workflows")
+        shutil.rmtree(path / ".github", ignore_errors=True)
+
+    rich.print(
+        "\n\nDone! You can now build your application with [blue]doover app build[/blue], run it with [blue]doover app run[/blue], or deploy it with [blue]doover app deploy[/blue].\n"
+    )
 
 
 @app.command(
@@ -263,17 +276,16 @@ def run(
                 from paramiko import SSHClient
             except ImportError:
                 raise ImportError(
-                    "paramiko not found. Please install it with pip install paramiko"
+                    "paramiko not found. Please install it with uv add paramiko"
                 )
 
-            username = typer.prompt(
+            username = questionary.text(
                 f"Please enter the username for {remote}:", default="doovit"
-            )
-            password = typer.prompt(
+            ).ask()
+            password = questionary.password(
                 "Please enter the password (skip for SSH keys):",
                 default="doovit",
-                hide_input=True,
-            )
+            ).ask()
 
             client = SSHClient()
             client.load_system_host_keys()
@@ -369,10 +381,12 @@ def build(
     )
 
 
-@app.command()
-def test():
-    """Run tests on the application. This uses pytest and requires uv to be installed."""
-    call_with_uv("pytest")
+@app.command(
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
+)
+def test(ctx: typer.Context):
+    """Run tests on the application. This uses pytest and accepts any arguments to `pytest`."""
+    call_with_uv("pytest", *ctx.args)
 
 
 @app.command()

@@ -14,7 +14,7 @@ app = Typer(no_args_is_help=True)
 
 
 @app.command()
-def compose_report(
+def compose(
     period_from: Annotated[
         datetime, Argument(help="Start of the period to report on")
     ] = datetime.now() - timedelta(days=7),
@@ -33,7 +33,7 @@ def compose_report(
     Compose a report locally.
 
     Example Usage:
-    pydoover compose_report --agent_ids "abcdefg,abdfgds" --agent_names "Agent 1,Agent 2"
+    doover report compose --agent_ids "abcdefg,abdfgds" --agent_names "Agent 1,Agent 2"
     """
 
     if isinstance(agent_ids, str):

@@ -6,7 +6,7 @@ from typing import Annotated
 import typer
 import jsf
 
-from .utils.apps import get_app_directory, call_with_uv
+from .utils.apps import get_app_directory, call_with_uv, get_app_config
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -18,7 +18,8 @@ def export(
     ] = Path(),
 ):
     """Export the application configuration to the doover config json file."""
-    call_with_uv(app_fp / "application" / "app_config.py")
+    config = get_app_config(app_fp)
+    call_with_uv(config.src_directory / "app_config.py")
 
 
 @app.command()
