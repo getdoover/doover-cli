@@ -9,7 +9,7 @@ dependencies = [
     "docker>=7.1.0",
     "jsf>=0.11.2",
     "paramiko>=3.5.1",
-    "pydoover",
+    "pydoover==0.4.1a1",
     "pytz>=2025.2",
     "questionary>=1.10.0",
     "requests>=2.32.3",
@@ -24,9 +24,6 @@ build-backend = "hatchling.build"
 
 [project.scripts]
 doover = "doover_cli:main"
-
-[tool.uv.sources]
-pydoover = { git = "https://spaneng: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@github.com/spaneng/pydoover", rev = "5d89334c" }
 
 [dependency-groups]
 dev = [
