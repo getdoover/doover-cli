@@ -391,20 +391,31 @@ def build(
 @app.command(
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
 )
-def test(ctx: typer.Context):
+def test(
+    ctx: typer.Context,
+    app_fp: Annotated[
+        Path, typer.Argument(help="Path to the application directory.")
+    ] = Path(),
+):
     """Run tests on the application. This uses pytest and accepts any arguments to `pytest`."""
-    call_with_uv("pytest", *ctx.args)
+    root_fp = get_app_directory(app_fp)
+
+    call_with_uv("pytest", str(root_fp), *ctx.args)
 
 
 @app.command()
 def lint(
+    app_fp: Annotated[
+        Path, typer.Argument(help="Path to the application directory.")
+    ] = Path(),
     fix: Annotated[
         bool,
         typer.Option(help="The --fix option passed to ruff to fix linting failure."),
     ] = False,
 ):
     """Run linter on the application. This uses ruff and requires uv to be installed."""
-    args = ["ruff", "check"]
+    root_fp = get_app_directory(app_fp)
+    args = ["ruff", "check", str(root_fp)]
     if fix:
         args.append("--fix")
 
@@ -413,13 +424,17 @@ def lint(
 
 @app.command(name="format")
 def format_(
+    app_fp: Annotated[
+        Path, typer.Argument(help="Path to the application directory.")
+    ] = Path(),
     fix: Annotated[
         bool,
         typer.Option(help="Make changes to fix formatting issues"),
     ] = False,
 ):
     """Run formatter on the application. This uses ruff and requires uv to be installed."""
-    args = ["ruff", "format"]
+    root_fp = get_app_directory(app_fp)
+    args = ["ruff", "format", str(root_fp)]
     if fix is False:
         args.append("--check")
 

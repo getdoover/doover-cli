@@ -20,9 +20,9 @@ def get_app_directory(root: Path = None) -> Path:
                 "Multiple doover_config.json files found. Please navigate to the correct application directory."
             )
         elif len(res) == 0:
-            root_fp = root_fp.parent
+            root_fp = root_fp.parent.absolute()
         else:
-            root_fp = res[0].parent
+            root_fp = res[0].parent.absolute()
             break
 
     return root_fp
