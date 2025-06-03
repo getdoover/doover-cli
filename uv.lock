@@ -285,7 +285,7 @@ wheels = [
 
 [[package]]
 name = "doover-cli"
-version = "0.1.5a1"
+version = "0.1.5"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -315,7 +315,7 @@ requires-dist = [
     { name = "docker", specifier = ">=7.1.0" },
     { name = "jsf", specifier = ">=0.11.2" },
     { name = "paramiko", specifier = ">=3.5.1" },
-    { name = "pydoover", specifier = "==0.4.1a1" },
+    { name = "pydoover", specifier = "==0.4.2a1" },
     { name = "pytz", specifier = ">=2025.2" },
     { name = "questionary", specifier = ">=1.10.0" },
     { name = "requests", specifier = ">=2.32.3" },
@@ -612,14 +612,14 @@ wheels = [
 
 [[package]]
 name = "pydoover"
-version = "0.4.1a1"
+version = "0.4.2a1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/29/58/25ddaa6637704fcaa6d9e085f8628cc8726e862ed7332fd89c2ec94cfba0/pydoover-0.4.1a1.tar.gz", hash = "sha256:9dbfcd74a1aa96aa27dce2a6d1f58acfc5920578ded53d95645ead4421b9c8f8", size = 114590, upload-time = "2025-06-02T06:40:40.694Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/be/89/f379583ef9f3c5b514ead45bf06e48f316110cedde0164de6711ba0dff21/pydoover-0.4.2a1.tar.gz", hash = "sha256:cac0a27fcca1b61c06e7b262dfadbdaa3b932d1a14f65aa7f39fd0d91110648b", size = 114580, upload-time = "2025-06-02T23:45:28.254Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c7/78/f91160447cea07885dda06c5722a13f37337ff3a1435305b2696b8457719/pydoover-0.4.1a1-py3-none-any.whl", hash = "sha256:a659babbee3ca520f4d18ffe35eafd87903c897fe208ebefd393f1f5641e90b1", size = 130945, upload-time = "2025-06-02T06:40:39.325Z" },
+    { url = "https://files.pythonhosted.org/packages/c3/c0/673dac5cb1302ba95aea8def4bfa02e185b30314a453b0999a5e986b32c9/pydoover-0.4.2a1-py3-none-any.whl", hash = "sha256:a1bc39da45f283f0002d96e90351c03292673a88c8b5de802e5c846f9b0417de", size = 130980, upload-time = "2025-06-02T23:45:27.077Z" },
 ]
 
 [[package]]
