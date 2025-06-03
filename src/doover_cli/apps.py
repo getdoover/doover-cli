@@ -197,7 +197,7 @@ def create(
     del content[name_as_snake_case]["key"]
     content[name_as_snake_case].update(
         {
-            "name": name_as_path,
+            "name": name_as_snake_case,
             "display_name": name,
             "description": description,
             "type": "DEV",
@@ -206,7 +206,7 @@ def create(
             "container_registry_profile": container_profile_key or "FIX-ME",
         }
     )
-    config_path.write_text(json.dumps(content))
+    config_path.write_text(json.dumps(content, indent=4))
 
     if git is True:
         # print("Initializing git repository...")

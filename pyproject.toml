@@ -9,7 +9,7 @@ dependencies = [
     "docker>=7.1.0",
     "jsf>=0.11.2",
     "paramiko>=3.5.1",
-    "pydoover==0.4.2a1",
+    "pydoover==0.4.2",
     "pytz>=2025.2",
     "questionary>=1.10.0",
     "requests>=2.32.3",
