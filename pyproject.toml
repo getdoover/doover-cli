@@ -1,6 +1,6 @@
 [project]
 name = "doover-cli"
-version = "0.1.4"
+version = "0.1.5a1"
 description = "CLI for Doover"
 requires-python = ">=3.11"
 dependencies = [

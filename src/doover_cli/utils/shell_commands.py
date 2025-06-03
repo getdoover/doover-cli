@@ -10,8 +10,8 @@ def run(command):
     print(f"[bold green]Running command: [/bold green]{command}")
     try:
         subprocess.run(command, shell=True, check=True)
-    except subprocess.CalledProcessError as e:
+    except subprocess.CalledProcessError:
         print(
-            f"[bold red]Command '{command}' failed with error: [/bold red]{e.stderr.strip()}"
+            f"[bold red]Command [blue]'{command}'[/blue] failed with error[/bold red]"
         )
         raise typer.Exit(1)

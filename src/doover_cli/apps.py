@@ -28,7 +28,6 @@ from .utils.shell_commands import run as shell_run
 
 CHANNEL_VIEWER = "https://my.doover.com/channels/dda"
 TEMPLATE_REPO = "https://api.github.com/repos/getdoover/app-template/tarball/main"
-AUTH_TOKEN = "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"
 
 VALID_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9-_]+$")
 IP_PATTERN = re.compile(r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
@@ -147,9 +146,7 @@ def create(
         container_registry = container_registry.value
 
     print("Fetching template repository...")
-    data = requests.get(
-        TEMPLATE_REPO, headers={"Authorization": f"Bearer {AUTH_TOKEN}"}
-    )
+    data = requests.get(TEMPLATE_REPO)
     if data.status_code != 200:
         raise Exception(f"Failed to fetch template repository: {data.status_code}")
 
@@ -299,7 +296,7 @@ def run(
         host_args = ()
 
     # docker compose -f docker-compose.pump-aquamonix.yml up --build --abort-on-container-exit
-    os.execl(
+    command = [
         docker_path,
         "docker",
         *host_args,
@@ -309,7 +306,9 @@ def run(
         "up",
         "--build",
         *ctx.args,
-    )
+    ]
+    rich.print(f"[green]Running: [/green]{' '.join(command)}")
+    os.execl(*command)
 
 
 @app.command()
@@ -325,7 +324,9 @@ def deploy(
     root_fp = get_app_directory(app_fp)
     app_config = get_app_config(root_fp)
 
-    print("Updating application on doover site...\n")
+    print(
+        f"Updating application on doover site ({state.config_manager.current.base_url})...\n"
+    )
 
     try:
         if app_config.key is None:
@@ -375,6 +376,12 @@ def build(
     """
     root_fp = get_app_directory(app_fp)
     config = get_app_config(root_fp)
+
+    if not config.image_name:
+        print(
+            "Image name not set in the configuration. Please set it in doover_config.json."
+        )
+        raise typer.Exit(1)
 
     shell_run(
         f"docker build {config.build_args} {' '.join(ctx.args)} -t {config.image_name} {str(root_fp)}",
