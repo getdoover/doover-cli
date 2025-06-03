@@ -312,12 +312,18 @@ def run(
 
 
 @app.command()
-def deploy(
+def publish(
     app_fp: Annotated[
         Path, typer.Argument(help="Path to the application directory.")
     ] = Path(),
+    skip_container: Annotated[
+        bool,
+        typer.Option(
+            help="Whether to build and push the container image. Defaults to building and pushing."
+        ),
+    ] = False,
 ):
-    """Deploy an application.
+    """Publish an application to Doover and its container registry.
 
     This pushes a built image to the app's docker registry and updates the application on the Doover site.
     """
@@ -339,6 +345,16 @@ def deploy(
     except HTTPException as e:
         print(f"Failed to update application: {e}")
         raise typer.Exit(1)
+
+    if app_config.build_args == "NO_BUILD":
+        print("App requested to not build. Skipping build step.")
+        print("Done!")
+        raise typer.Exit(0)
+
+    if skip_container is True:
+        print("User requested to skip container build and push. Skipping...")
+        print("Done!")
+        raise typer.Exit(0)
 
     print("\nApp updated. Now pushing the image to the registry...\n")
 
