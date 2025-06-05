@@ -323,6 +323,12 @@ def publish(
             help="Whether to build and push the container image. Defaults to building and pushing."
         ),
     ] = False,
+    staging: Annotated[
+        bool,
+        typer.Option(
+            help="Whether to force staging mode. This defaults to working it out based on the API URL."
+        ),
+    ] = None,
     _profile: ProfileAnnotation = None,
 ):
     """Publish an application to Doover and its container registry.
@@ -336,14 +342,25 @@ def publish(
         f"Updating application on doover site ({state.config_manager.current.base_url})...\n"
     )
 
+    if staging is None:
+        is_staging = ".d.doover" in state.api.base_url
+    else:
+        is_staging = staging
+
+    key = app_config.staging_key if is_staging else app_config.key
+
     try:
-        if app_config.key is None:
+        if key is None:
             key = state.api.create_application(app_config)
-            app_config.key = key
+            if is_staging:
+                app_config.staging_key = key
+            else:
+                app_config.key = key
+
             app_config.save_to_disk()
             print(f"Created new application with key: {key}")
         else:
-            state.api.update_application(app_config)
+            state.api.update_application(app_config, is_staging=is_staging)
     except HTTPException as e:
         print(f"Failed to update application: {e}")
         raise typer.Exit(1)
