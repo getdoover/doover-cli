@@ -3,6 +3,7 @@ import time
 
 from typer import Typer
 
+from .utils.api import AgentAnnotation, ProfileAnnotation
 from .utils.misc import get_ip
 from .utils.misc import choose
 from .utils.state import state
@@ -102,7 +103,7 @@ def activate_deactivate_tunnel(tunnel_id: str = None, activate: bool = True):
 
 
 @app.command()
-def get():
+def get(_profile: ProfileAnnotation = None, _agent: AgentAnnotation = None):
     """Get tunnels for an agent"""
     tunnels = state.api.get_tunnels(state.agent_id)
     for tunnel in tunnels["tunnels"]:
@@ -112,13 +113,21 @@ def get():
 
 
 @app.command()
-def activate(tunnel_id: str = None):
+def activate(
+    tunnel_id: str = None,
+    _profile: ProfileAnnotation = None,
+    _agent: AgentAnnotation = None,
+):
     """Activate a tunnel"""
     activate_deactivate_tunnel(tunnel_id, activate=True)
 
 
 @app.command()
-def deactivate(tunnel_id: str = None):
+def deactivate(
+    tunnel_id: str = None,
+    _profile: ProfileAnnotation = None,
+    _agent: AgentAnnotation = None,
+):
     """Deactivate a tunnel"""
     activate_deactivate_tunnel(tunnel_id, activate=False)
 
@@ -129,6 +138,8 @@ def open_(
     protocol: str = "http",
     timeout: int = 15,
     restrict_cidr: bool = True,
+    _profile: ProfileAnnotation = None,
+    _agent: AgentAnnotation = None,
 ):
     """Open an arbitrary tunnel for a doover agent"""
     host, port = address.split(":")
@@ -136,7 +147,12 @@ def open_(
 
 
 @app.command()
-def open_ssh(timeout: int = 15, restrict_cidr: bool = True):
+def open_ssh(
+    timeout: int = 15,
+    restrict_cidr: bool = True,
+    _profile: ProfileAnnotation = None,
+    _agent: AgentAnnotation = None,
+):
     """Open an SSH tunnel for a doover agent"""
     tunnel = create_tunnel("127.0.0.1", 22, "tcp", timeout, restrict_cidr)
     print(tunnel)
@@ -154,7 +170,7 @@ def open_ssh(timeout: int = 15, restrict_cidr: bool = True):
 
 
 @app.command()
-def close_all():
+def close_all(_profile: ProfileAnnotation = None, _agent: AgentAnnotation = None):
     """Close all tunnels for a doover agent"""
     channel = state.api.get_channel_named("tunnels", state.agent_id)
     channel.publish({"to_close": channel.aggregate["open"]})

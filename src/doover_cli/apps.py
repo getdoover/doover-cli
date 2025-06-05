@@ -21,6 +21,7 @@ import questionary
 
 from docker.errors import ImageNotFound
 
+from .utils.api import ProfileAnnotation
 from .utils.apps import get_app_directory, call_with_uv, get_docker_path, get_app_config
 from .utils.prompt import QuestionaryPromptCommand
 from .utils.state import state
@@ -322,6 +323,7 @@ def publish(
             help="Whether to build and push the container image. Defaults to building and pushing."
         ),
     ] = False,
+    _profile: ProfileAnnotation = None,
 ):
     """Publish an application to Doover and its container registry.
 

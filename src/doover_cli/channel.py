@@ -10,15 +10,20 @@ from pydoover.cloud.api import NotFound, Message
 
 from typer import Argument, Option, Typer
 
-from doover_cli.utils import parsers
-from doover_cli.utils.formatters import format_channel_info
+from .utils import parsers
+from .utils.formatters import format_channel_info
 from .utils.state import state
+from .utils.api import ProfileAnnotation, AgentAnnotation
 
 app = Typer(no_args_is_help=True)
 
 
 @app.command()
-def get(channel_name: Annotated[str, Argument(help="Channel name to get info for")]):
+def get(
+    channel_name: Annotated[str, Argument(help="Channel name to get info for")],
+    _profile: ProfileAnnotation = None,
+    _agent: AgentAnnotation = None,
+):
     """Get channel info"""
     try:
         channel = state.api.get_channel(channel_name)
@@ -35,7 +40,11 @@ def get(channel_name: Annotated[str, Argument(help="Channel name to get info for
 
 
 @app.command()
-def create(channel_name: Annotated[str, Argument(help="Channel name to create")]):
+def create(
+    channel_name: Annotated[str, Argument(help="Channel name to create")],
+    _profile: ProfileAnnotation = None,
+    _agent: AgentAnnotation = None,
+):
     """Create new channel"""
     channel = state.api.create_channel(channel_name, state.agent_id)
     print(f"Channel created successfully. ID: {channel.id}")
@@ -54,6 +63,8 @@ def create_task(
             help="Processor name for this task to trigger.",
         ),
     ],
+    _profile: ProfileAnnotation = None,
+    _agent: AgentAnnotation = None,
 ):
     """Create new task channel."""
     processor = state.api.get_channel_named(processor_name, state.agent_id)
@@ -113,6 +124,8 @@ def invoke_local_task(
     dry_run: Annotated[
         bool, Option(help="Whether to run the task without invoking it")
     ] = False,
+    _profile: ProfileAnnotation = None,
+    _agent: AgentAnnotation = None,
 ):
     """Invoke a task locally."""
     task = state.api.get_channel_named(task_name, state.agent_id)
@@ -167,6 +180,8 @@ def create_processor(
     processor_name: Annotated[
         str, Argument(parser=parsers.processor_name, help="Processor name.")
     ],
+    _profile: ProfileAnnotation = None,
+    _agent: AgentAnnotation = None,
 ):
     """Create new processor channel."""
     processor = state.api.create_processor(processor_name, state.agent_id)
@@ -180,6 +195,8 @@ def publish(
     message: Annotated[
         str, Argument(help="Message to publish", parser=parsers.maybe_json)
     ],
+    _profile: ProfileAnnotation = None,
+    _agent: AgentAnnotation = None,
 ):
     """Publish to a doover channel."""
     try:
@@ -199,6 +216,8 @@ def publish(
 def publish_file(
     channel_name: Annotated[str, Argument(help="Channel name to publish to")],
     file_path: Annotated[Path, Argument(help="Path to the file to publish")],
+    _profile: ProfileAnnotation = None,
+    _agent: AgentAnnotation = None,
 ):
     """Publish file to a processor channel."""
     if not file_path.exists():
@@ -224,6 +243,8 @@ def publish_processor(
         ),
     ],
     package_path: Annotated[Path, Argument(help="Path to the package to publish")],
+    _profile: ProfileAnnotation = None,
+    _agent: AgentAnnotation = None,
 ):
     """Publish processor package to a processor channel."""
     if not package_path.exists():
@@ -250,6 +271,8 @@ def follow(
     poll_rate: Annotated[
         int, Argument(help="Frequency to check for new messages (in seconds)")
     ] = 5,
+    _profile: ProfileAnnotation = None,
+    _agent: AgentAnnotation = None,
 ):
     """Follow aggregate of a doover channel"""
     channel = state.api.get_channel_named(channel_name, state.agent_id)
@@ -273,6 +296,8 @@ def subscribe(
     channel_name: Annotated[
         str, Argument(help="Channel name to add the subscription to")
     ],
+    _profile: ProfileAnnotation = None,
+    _agent: AgentAnnotation = None,
 ):
     """Add a channel to a task's subscriptions."""
     task = state.api.get_channel_named(task_name, state.agent_id)
@@ -296,6 +321,8 @@ def unsubscribe(
     channel_name: Annotated[
         str, Argument(help="Channel name to remove the subscription from")
     ],
+    _profile: ProfileAnnotation = None,
+    _agent: AgentAnnotation = None,
 ):
     """Remove a channel to a task's subscriptions."""
     task = state.api.get_channel_named(task_name, state.agent_id)

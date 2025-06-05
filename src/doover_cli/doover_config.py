@@ -5,6 +5,7 @@ from pathlib import Path
 from typer import Argument, Typer
 from typing_extensions import Annotated
 
+from .utils.api import ProfileAnnotation, AgentAnnotation
 from .utils.state import state
 
 app = Typer(no_args_is_help=True)
@@ -18,6 +19,8 @@ def deploy(
             help="Deployment config file to use. This is usually a doover_config.json file."
         ),
     ],
+    _profile: ProfileAnnotation = None,
+    _agent: AgentAnnotation = None,
 ):
     """Deploy a doover config file to the site."""
     if not config_file.exists():

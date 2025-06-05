@@ -2,13 +2,39 @@ import os
 import re
 
 from datetime import datetime, timezone
+from typing import Annotated
 
 from pydoover.cloud.api import Client
 from pydoover.cloud.api import ConfigManager
+from typer import Option
 
 from .misc import choose
 
 KEY_MATCH = re.compile(r"[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}")
+
+
+def profile_callback(value: str | None):
+    from .state import state
+
+    state.config_manager.current_profile = value or "default"
+    return value
+
+
+def agent_callback(value: str | None):
+    from .state import state
+
+    state.agent_query = value
+    return value
+
+
+ProfileAnnotation = Annotated[
+    str,
+    Option(help="Config profile to use for this request.", callback=profile_callback),
+]
+AgentAnnotation = Annotated[
+    str,
+    Option(help="Agent ID or name to use for this request.", callback=agent_callback),
+]
 
 
 def on_api_login(api: Client, config_manager: ConfigManager):
@@ -55,7 +81,9 @@ def setup_api(agent_id: str, config_manager: ConfigManager, read: bool = True):
         login_callback=lambda: on_api_login(api, config_manager),
     )
 
-    if not (config.token and config.token_expires > datetime.now(timezone.utc)):
+    if config.token is None or (
+        config.token_expires and config.token_expires < datetime.now(timezone.utc)
+    ):
         api.login()
 
     return api, resolve_agent_query(agent_id, api)

@@ -8,6 +8,7 @@ from typing_extensions import Annotated
 
 from typer import Argument, Typer
 
+from .utils.api import ProfileAnnotation
 from .utils.state import state
 
 app = Typer(no_args_is_help=True)
@@ -28,6 +29,7 @@ def compose(
     package_path: Annotated[
         str, Argument(help="Path to the python report generator module to compose")
     ] = "pydoover.reports.xlsx_base",
+    _profile: ProfileAnnotation = None,
 ):
     """
     Compose a report locally.
