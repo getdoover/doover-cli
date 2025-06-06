@@ -347,13 +347,13 @@ def publish(
     else:
         is_staging = staging
 
-    key = app_config.staging_key if is_staging else app_config.key
+    key = app_config.staging_config.get("key") if is_staging else app_config.key
 
     try:
         if key is None:
-            key = state.api.create_application(app_config)
+            key = state.api.create_application(app_config, is_staging=is_staging)
             if is_staging:
-                app_config.staging_key = key
+                app_config.staging_config["key"] = key
             else:
                 app_config.key = key
 

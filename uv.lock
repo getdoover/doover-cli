@@ -285,7 +285,7 @@ wheels = [
 
 [[package]]
 name = "doover-cli"
-version = "0.1.6a1"
+version = "0.1.6a2"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -613,7 +613,7 @@ wheels = [
 [[package]]
 name = "pydoover"
 version = "0.4.4a1"
-source = { git = "https://github.com/getdoover/pydoover#a957f3e5d42700eef2c1c2063fd5152300defaa3" }
+source = { git = "https://github.com/getdoover/pydoover#763ff7bc2f15c09eec6db8750e977bc72387b2b0" }
 dependencies = [
     { name = "requests" },
 ]
