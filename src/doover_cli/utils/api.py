@@ -29,11 +29,19 @@ def agent_callback(value: str | None):
 
 ProfileAnnotation = Annotated[
     str,
-    Option(help="Config profile to use for this request.", callback=profile_callback),
+    Option(
+        "--profile",
+        help="Config profile to use for this request.",
+        callback=profile_callback,
+    ),
 ]
 AgentAnnotation = Annotated[
     str,
-    Option(help="Agent ID or name to use for this request.", callback=agent_callback),
+    Option(
+        "--agent",
+        help="Agent ID or name to use for this request.",
+        callback=agent_callback,
+    ),
 ]
 
 
