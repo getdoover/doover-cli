@@ -11,6 +11,7 @@ from urllib.parse import urlencode
 from pathlib import Path
 from enum import Enum
 
+import jsonschema.exceptions
 import rich
 from pydoover.cloud.api import HTTPException
 from typing_extensions import Annotated
@@ -239,10 +240,12 @@ def create(
 )
 def run(
     ctx: typer.Context,
-    remote: typer.Argument(
+    remote: Annotated[
         str,
-        help="Remote host to run the application on. If not specified, runs locally.",
-    ) = "localhost",
+        typer.Argument(
+            help="Remote host to run the application on. If not specified, runs locally.",
+        ),
+    ] = "localhost",
     port: int = 2375,
 ):
     """Runs an application. This assumes you have a docker-compose file in the `simulator` directory.
@@ -317,6 +320,7 @@ def run(
 
 @app.command()
 def publish(
+    ctx: typer.Context,
     app_fp: Annotated[
         Path, typer.Argument(help="Path to the application directory.")
     ] = Path(),
@@ -332,6 +336,13 @@ def publish(
             help="Whether to force staging mode. This defaults to working it out based on the API URL."
         ),
     ] = None,
+    export_config: Annotated[
+        bool,
+        typer.Option(
+            "--export-config",
+            help="Export the application configuration before publishing.",
+        ),
+    ] = True,
     _profile: ProfileAnnotation = None,
 ):
     """Publish an application to Doover and its container registry.
@@ -339,6 +350,21 @@ def publish(
     This pushes a built image to the app's docker registry and updates the application on the Doover site.
     """
     root_fp = get_app_directory(app_fp)
+
+    if export_config is True:
+        from .config_schema import export
+
+        try:
+            ctx.invoke(export, ctx, app_fp=root_fp, validate_=True)
+        except jsonschema.exceptions.SchemaError as e:
+            summary, remainder = str(e).split("\n", 1)
+            rich.print(
+                f"[red]Failed to export application configuration: {summary}[/red]\n{remainder}\n"
+            )
+            typer.confirm("Do you want to continue?", abort=True)
+        else:
+            rich.print("[green]Exported application configuration.[/green]")
+
     app_config = get_app_config(root_fp)
 
     print(

@@ -3,7 +3,10 @@ import json
 from pathlib import Path
 
 import typer
+
 from pydoover.cloud.api.application import Application
+
+from .shell_commands import run
 
 
 def get_app_directory(root: Path = None) -> Path:
@@ -37,11 +40,15 @@ def get_uv_path() -> Path:
     return uv_path
 
 
-def call_with_uv(*args, uv_run: bool = True):
+def call_with_uv(*args, uv_run: bool = True, in_shell: bool = False):
     uv_path = get_uv_path()
     if uv_run:
         args = ["uv", "run"] + list(args)
-    os.execl(str(uv_path.absolute()), *args)
+
+    if in_shell:
+        run(" ".join(str(r) for r in args))
+    else:
+        os.execl(str(uv_path.absolute()), *args)
 
 
 def get_docker_path() -> Path:
