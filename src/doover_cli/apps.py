@@ -239,7 +239,10 @@ def create(
 )
 def run(
     ctx: typer.Context,
-    remote: str = typer.Argument(None),
+    remote: typer.Argument(
+        str,
+        help="Remote host to run the application on. If not specified, runs locally.",
+    ) = "localhost",
     port: int = 2375,
 ):
     """Runs an application. This assumes you have a docker-compose file in the `simulator` directory.
