@@ -298,7 +298,7 @@ def run(
 
     # docker compose -f docker-compose.pump-aquamonix.yml up --build --abort-on-container-exit
     command = [
-        docker_path,
+        str(docker_path),
         "docker",
         *host_args,
         "compose",
