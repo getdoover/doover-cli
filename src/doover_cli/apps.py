@@ -32,7 +32,7 @@ TEMPLATE_REPO = "https://api.github.com/repos/getdoover/app-template/tarball/mai
 
 VALID_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9-_]+$")
 IP_PATTERN = re.compile(r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
-HOSTNAME_PATTERN = re.compile(r"(?P<host>[a-zA-Z0-9-_]?)-?(?P<serial>[0-9a-zA-Z]{6})")
+HOSTNAME_PATTERN = re.compile(r"(?P<host>[a-zA-Z0-9_]*)-*(?P<serial>[0-9a-zA-Z]{6})")
 
 app = typer.Typer(no_args_is_help=True)
 
