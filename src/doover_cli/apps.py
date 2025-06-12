@@ -245,7 +245,7 @@ def run(
         typer.Argument(
             help="Remote host to run the application on. If not specified, runs locally.",
         ),
-    ] = "localhost",
+    ] = None,
     port: int = 2375,
 ):
     """Runs an application. This assumes you have a docker-compose file in the `simulator` directory.
