@@ -20,7 +20,6 @@ import requests
 import typer
 import questionary
 
-from docker.errors import ImageNotFound
 
 from .utils.api import ProfileAnnotation
 from .utils.apps import get_app_directory, call_with_uv, get_docker_path, get_app_config
@@ -339,7 +338,6 @@ def publish(
     export_config: Annotated[
         bool,
         typer.Option(
-            "--export-config",
             help="Export the application configuration before publishing.",
         ),
     ] = True,
@@ -406,20 +404,24 @@ def publish(
 
     print("\nApp updated. Now pushing the image to the registry...\n")
 
-    import docker
+    typer.confirm(
+        f"Do you want to continue? I will build {app_config.image_name} and publish it to the registry.",
+        abort=True,
+    )
+    # import docker
+    #
+    # client = docker.from_env()
+    # try:
+    #     client.images.get(app_config.image_name)
+    # except ImageNotFound:
+    #     typer.confirm(
+    #         f"Image not found with name: {app_config.image_name}. Do you want me to build the image first?",
+    #         abort=True,
+    #     )
 
-    client = docker.from_env()
-    try:
-        client.images.get(app_config.image_name)
-    except ImageNotFound:
-        typer.confirm(
-            f"Image not found with name: {app_config.image_name}. Do you want me to build the image first?",
-            abort=True,
-        )
-
-        shell_run(
-            f"docker build {app_config.build_args} -t {app_config.image_name} {str(root_fp)}"
-        )
+    shell_run(
+        f"docker build {app_config.build_args} -t {app_config.image_name} {str(root_fp)}"
+    )
 
     shell_run(f"docker push {app_config.image_name}")
     print("\n\nDone!")
