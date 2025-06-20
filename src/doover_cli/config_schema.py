@@ -25,12 +25,22 @@ def export(
             help="Validate the configuration before exporting.",
         ),
     ] = True,
+    config_fp: Annotated[
+        Path,
+        typer.Option(
+            help="Path to the configuration file to export to. Defaults to src/app_name/app_config.py in the application directory.",
+            exists=False,
+            file_okay=True,
+        ),
+    ] = None,
 ):
     """Export the application configuration to the doover config json file."""
-    config = get_app_config(app_fp)
+    if config_fp is None:
+        config = get_app_config(app_fp)
+        config_fp = config.src_directory / "app_config.py"
 
     print("Exporting application configuration...")
-    call_with_uv(config.src_directory / "app_config.py", in_shell=True)
+    call_with_uv(config_fp, in_shell=True)
 
     if validate_ is True:
         print("Validating application configuration...")
