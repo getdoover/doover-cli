@@ -341,6 +341,12 @@ def publish(
             help="Export the application configuration before publishing.",
         ),
     ] = True,
+    buildx: Annotated[
+        bool,
+        typer.Option(
+            help="Use docker buildx to build the application. This is useful for multi-platform builds.",
+        ),
+    ] = True,
     _profile: ProfileAnnotation = None,
 ):
     """Publish an application to Doover and its container registry.
@@ -420,7 +426,7 @@ def publish(
     #     )
 
     shell_run(
-        f"docker build {app_config.build_args} -t {app_config.image_name} {str(root_fp)}"
+        f"docker {'buildx' if buildx else ''} build {app_config.build_args} -t {app_config.image_name} {str(root_fp)}"
     )
 
     shell_run(f"docker push {app_config.image_name}")
@@ -435,6 +441,12 @@ def build(
     app_fp: Annotated[
         Path, typer.Argument(help="Path to the application directory.")
     ] = Path(),
+    buildx: Annotated[
+        bool,
+        typer.Option(
+            help="Use docker buildx to build the application. This is useful for multi-platform builds.",
+        ),
+    ] = True,
 ):
     """Build an application. Accepts additional arguments to pass to the `docker build` command.
 
@@ -450,7 +462,7 @@ def build(
         raise typer.Exit(1)
 
     shell_run(
-        f"docker build {config.build_args} {' '.join(ctx.args)} -t {config.image_name} {str(root_fp)}",
+        f"docker {'buildx' if buildx else ''} build {config.build_args} {' '.join(ctx.args)} -t {config.image_name} {str(root_fp)}",
     )
 
 
