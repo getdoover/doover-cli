@@ -10,6 +10,7 @@ from .simulator import app as simulators_app
 from .agent import app as agents_app
 from .channel import app as channels_app
 from .doover_config import app as doover_config_app
+from .dda_logs import app as dda_logs_app
 from .grpc import app as grpc_app
 from .login import app as login_app
 from .report import app as reports_app
@@ -37,6 +38,7 @@ app.add_typer(login_app)
 app.add_typer(reports_app, name="report", help="Generate and manage reports.")
 app.add_typer(tunnels_app, name="tunnel", help="Manage SSH tunnels for remote access.")
 app.add_typer(grpc_app, name="grpc", help="Interact with running gRPC servers.")
+app.add_typer(dda_logs_app, name="dda-logs", help="Convert DDA message logs to JSON.")
 
 
 def version_callback(value: bool):

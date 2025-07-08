@@ -285,7 +285,7 @@ wheels = [
 
 [[package]]
 name = "doover-cli"
-version = "0.1.7"
+version = "0.1.8a0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
