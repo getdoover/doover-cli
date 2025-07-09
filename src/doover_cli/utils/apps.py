@@ -32,6 +32,10 @@ def get_app_directory(root: Path = None) -> Path:
 
 
 def get_uv_path() -> Path:
+    brew = Path("/usr/homebrew/bin/uv")
+    if brew.exists():
+        return brew
+
     uv_path = Path.home() / ".local" / "bin" / "uv"
     if not uv_path.exists():
         raise RuntimeError(
