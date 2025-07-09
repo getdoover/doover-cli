@@ -202,7 +202,8 @@ def create(
             "display_name": name,
             "description": description,
             "type": "DEV",
-            "image_name": f"{container_registry}/{name_as_snake_case}:latest",
+            # git repos default to "main" rather than "latest" (dockerhub).
+            "image_name": f"{container_registry}/{name_as_path}:{'main' if container_registry.startswith('ghcr') else 'latest'}",
             "owner_org": owner_org_key or "FIX-ME",
             "container_registry_profile": container_profile_key or "FIX-ME",
         }
