@@ -98,12 +98,12 @@ def validate(
 @app.command()
 def generate(
     ctx: typer.Context,
-    app_fp: Annotated[
-        Path, typer.Argument(help="Path to the application directory.")
-    ] = Path(),
     output_fp: Annotated[
         Path, typer.Argument(help="Path to the output directory.")
     ] = None,
+    app_fp: Annotated[
+        Path, typer.Argument(help="Path to the application directory.")
+    ] = Path(),
     export_: Annotated[
         bool,
         typer.Option(
@@ -135,6 +135,7 @@ def generate(
             continue
 
         output = jsf.JSF(schema).generate(use_defaults=True, use_examples=True)
+        output = json.dumps(output, indent=4)
         if output_fp:
             output_fp.write_text(output)
         else:
