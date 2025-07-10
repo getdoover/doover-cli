@@ -145,6 +145,7 @@ def create(
         container_registry = "spaneng"
     else:
         container_registry = container_registry.value
+    container_registry = container_registry.strip()
 
     print("Fetching template repository...")
     data = requests.get(TEMPLATE_REPO)
@@ -204,8 +205,8 @@ def create(
             "type": "DEV",
             # git repos default to "main" rather than "latest" (dockerhub).
             "image_name": f"{container_registry}/{name_as_path}:{'main' if container_registry.startswith('ghcr') else 'latest'}",
-            "owner_org": owner_org_key or "FIX-ME",
-            "container_registry_profile": container_profile_key or "FIX-ME",
+            "owner_org_key": owner_org_key or "FIX-ME",
+            "container_registry_profile_key": container_profile_key or "FIX-ME",
         }
     )
     config_path.write_text(json.dumps(content, indent=4))
