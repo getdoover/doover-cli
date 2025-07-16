@@ -1,6 +1,6 @@
 [project]
 name = "doover-cli"
-version = "0.1.8a"
+version = "0.1.8"
 description = "CLI for Doover"
 requires-python = ">=3.11"
 dependencies = [
@@ -9,7 +9,7 @@ dependencies = [
     "docker>=7.1.0",
     "jsf>=0.11.2",
     "paramiko>=3.5.1",
-    "pydoover>=0.4.5",
+    "pydoover>=0.4.11",
     "pytz>=2025.2",
     "questionary>=1.10.0",
     "requests>=2.32.3",
