@@ -301,6 +301,9 @@ def run(
 
         # os.execl will use the current env so let's just set DOCKER_HOST here.
         os.environ["DOCKER_HOST"] = f"{remote}:{port}"
+        rich.print(
+            f"[green]Environment variable set: [/green]DOCKER_HOST={os.environ['DOCKER_HOST']}"
+        )
 
     # docker compose -f docker-compose.pump-aquamonix.yml up --build --abort-on-container-exit
     command = [
