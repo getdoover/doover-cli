@@ -299,15 +299,13 @@ def run(
             print(stdout.read().decode())
             print(stderr.read().decode())
 
-        host_args = (f"--host={remote}:{port}",)
-    else:
-        host_args = ()
+        # os.execl will use the current env so let's just set DOCKER_HOST here.
+        os.environ["DOCKER_HOST"] = f"{remote}:{port}"
 
     # docker compose -f docker-compose.pump-aquamonix.yml up --build --abort-on-container-exit
     command = [
         str(docker_path),
         "docker",
-        *host_args,
         "compose",
         "-f",
         str(root_fp / "simulators" / "docker-compose.yml"),
