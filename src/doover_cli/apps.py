@@ -383,18 +383,18 @@ def publish(
     else:
         is_staging = staging
 
-    key = app_config.staging_config.get("key") if is_staging else app_config.key
+    app_id = app_config.staging_config.get("id") if is_staging else app_config.id
 
     try:
-        if key is None:
-            key = state.api.create_application(app_config, is_staging=is_staging)
+        if app_id is None:
+            app_id = state.api.create_application(app_config, is_staging=is_staging)
             if is_staging:
-                app_config.staging_config["key"] = key
+                app_config.staging_config["id"] = app_id
             else:
-                app_config.key = key
+                app_config.id = app_id
 
             app_config.save_to_disk()
-            print(f"Created new application with key: {key}")
+            print(f"Created new application with id: {app_id}")
         else:
             state.api.update_application(app_config, is_staging=is_staging)
     except HTTPException as e:
@@ -404,6 +404,21 @@ def publish(
     if app_config.build_args == "NO_BUILD":
         print("App requested to not build. Skipping build step.")
         print("Done!")
+        raise typer.Exit(0)
+
+    if app_config.type == "PRO":
+        print("\nBuilding package.zip for upload...")
+        shell_run("./build.sh", cwd=root_fp)
+        print("Uploading package.zip to Doover...")
+        state.api.publish_processor_source(
+            app_id, (root_fp / "package.zip").read_bytes()
+        )
+        print("Done!")
+
+        print("Creating new lambda version release...")
+        state.api.create_processor_version(app_id)
+        print("Done!")
+
         raise typer.Exit(0)
 
     if skip_container is True:

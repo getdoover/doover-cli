@@ -36,7 +36,7 @@ def export(
 ):
     """Export the application configuration to the doover config json file."""
     if config_fp is None:
-        call_with_uv("export-config", in_shell=True)
+        call_with_uv("export-config", in_shell=True, cwd=app_fp)
     else:
         config = get_app_config(app_fp)
         call_with_uv(config.src_directory / "app_config.py", in_shell=True)

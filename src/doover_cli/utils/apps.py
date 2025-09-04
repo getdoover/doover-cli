@@ -44,14 +44,16 @@ def get_uv_path() -> Path:
     return uv_path
 
 
-def call_with_uv(*args, uv_run: bool = True, in_shell: bool = False):
+def call_with_uv(*args, uv_run: bool = True, in_shell: bool = False, cwd: Path = None):
     uv_path = get_uv_path()
     if uv_run:
         args = ["uv", "run"] + list(args)
 
     if in_shell:
-        run(" ".join(str(r) for r in args))
+        run(" ".join(str(r) for r in args), cwd=cwd)
     else:
+        if cwd:
+            os.chdir(cwd)
         os.execl(str(uv_path.absolute()), *args)
 
 

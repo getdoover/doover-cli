@@ -30,3 +30,6 @@ dev = [
     "pre-commit>=4.2.0",
     "pytest>=8.3.5",
 ]
+
+[tool.uv.sources]
+pydoover = { git = "https://github.com/getdoover/pydoover", branch = "doover-2" }
