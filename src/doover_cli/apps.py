@@ -406,6 +406,11 @@ def publish(
         print("Done!")
         raise typer.Exit(0)
 
+    if skip_container is True:
+        print("User requested to skip container build and push. Skipping...")
+        print("Done!")
+        raise typer.Exit(0)
+
     if app_config.type == "PRO":
         print("\nBuilding package.zip for upload...")
         shell_run("./build.sh", cwd=root_fp)
@@ -419,11 +424,6 @@ def publish(
         state.api.create_processor_version(app_id)
         print("Done!")
 
-        raise typer.Exit(0)
-
-    if skip_container is True:
-        print("User requested to skip container build and push. Skipping...")
-        print("Done!")
         raise typer.Exit(0)
 
     print("\nApp updated. Now pushing the image to the registry...\n")
