@@ -375,7 +375,7 @@ wheels = [
 
 [[package]]
 name = "doover-cli"
-version = "0.1.8a0"
+version = "0.1.9a1"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -383,6 +383,7 @@ dependencies = [
     { name = "docker" },
     { name = "jsf" },
     { name = "paramiko" },
+    { name = "prompt-toolkit" },
     { name = "pydoover" },
     { name = "pytz" },
     { name = "questionary" },
@@ -405,6 +406,7 @@ requires-dist = [
     { name = "docker", specifier = ">=7.1.0" },
     { name = "jsf", specifier = ">=0.11.2" },
     { name = "paramiko", specifier = ">=3.5.1" },
+    { name = "prompt-toolkit", specifier = "==3.0.51" },
     { name = "pydoover", specifier = ">=0.4.11" },
     { name = "pytz", specifier = ">=2025.2" },
     { name = "questionary", specifier = ">=1.10.0" },
