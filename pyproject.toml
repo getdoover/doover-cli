@@ -16,7 +16,7 @@ dependencies = [
     "typer==0.15.1",
     "tzlocal>=5.3.1",
     "xlsxwriter>=3.2.3",
-    "prompt-toolkit==3.0.51"
+    "prompt-toolkit==3.0.51",
 ]
 
 [build-system]

@@ -379,7 +379,9 @@ def publish(
     )
 
     if staging is None:
-        is_staging = ".d.doover" in state.api.base_url
+        is_staging = (
+            ".d.doover" in state.api.base_url or "staging" in state.api.base_url
+        )
     else:
         is_staging = staging
 

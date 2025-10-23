@@ -26,6 +26,8 @@ class State:
         if self._api is None:
             self._api, agent = setup_api(self.agent_query, self.config_manager)
             self.agent = agent
+            if isinstance(agent, int):
+                self.agent_id = agent
             # self.agent_id = self.api.agent_id = agent.id
         return self._api
 
