@@ -136,8 +136,8 @@ def login_dv2(
         base = "https://auth.staging.udoover.com"
         client_id = "08a9ae8c-0668-428b-a691-f7eaa526aca0"
     else:
-        base = "https://auth.udoover.com"
-        client_id = "..."
+        base = "https://auth.doover.com"
+        client_id = "08a9ae8c-0668-428b-a691-f7eaa526aca0"
 
     config = requests.get(f"{base}/.well-known/openid-configuration").json()
     endpoint = config["device_authorization_endpoint"]
