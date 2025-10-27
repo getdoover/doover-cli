@@ -190,10 +190,10 @@ def login_dv2(
             + timedelta(seconds=token_data["expires_in"]),
             base_url="https://api.staging.udoover.com"
             if staging
-            else "https://api.udoover.com",
+            else "https://api.doover.com",
             base_data_url="https://data.staging.udoover.com/api"
             if staging
-            else "https://data.udoover.com/api",
+            else "https://data.doover.com/api",
             auth_server_url=base,
             auth_server_client_id=client_id,
             refresh_token=token_data["refresh_token"],
