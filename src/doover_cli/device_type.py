@@ -6,7 +6,10 @@ from typing import Annotated
 import requests
 import typer
 
-BASE_URL = "https://api.sandbox.udoover.com"
+from .utils.api import ProfileAnnotation
+from .utils.state import state
+
+BASE_URL = "https://api.staging.udoover.com"
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -18,23 +21,18 @@ def upload_installer_tar(
     installer_fp: Annotated[
         Path, typer.Argument(help="Path to the installer directory.")
     ] = Path(),
-    token: Annotated[
-        str,
-        typer.Option(
-            "--token",
-            help="Authentication token.",
-        ),
-    ] = None,
+    _profile: ProfileAnnotation = None,
 ):
     """Compress and upload an installer to the Doover 2.0 Control Plane API."""
+    state.api.client.do_refresh_token()
     fp = Path(f"/tmp/{uuid.uuid4()}")
     shutil.make_archive(
         base_name=str(fp), format="gztar", root_dir=installer_fp.resolve()
     )
     resp = requests.patch(
-        f"{BASE_URL}/devices/types/{device_type_id}/",
+        f"{state.config_manager.current.base_url}/devices/types/{device_type_id}/",
         files={"installer": open(f"{fp}.tar.gz", "rb")},
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"Authorization": f"Bearer {state.api.access_token.token}"},
     )
     resp.raise_for_status()
     print("Successfully uploaded installer.")
@@ -47,19 +45,14 @@ def upload_installer(
     installer_fp: Annotated[
         Path, typer.Argument(help="Path to the installer script.")
     ] = Path(),
-    token: Annotated[
-        str,
-        typer.Option(
-            "--token",
-            help="Authentication token.",
-        ),
-    ] = None,
+    _profile: ProfileAnnotation = None,
 ):
     """Upload an installer to the Doover 2.0 Control Plane API."""
+    state.api.client.do_refresh_token()
     resp = requests.patch(
-        f"{BASE_URL}/devices/types/{device_type_id}/",
+        f"{state.config_manager.current.base_url}/devices/types/{device_type_id}/",
         files={"installer": installer_fp.read_text()},
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"Authorization": f"Bearer {state.api.access_token.token}"},
     )
     resp.raise_for_status()
     print("Successfully uploaded installer.")
