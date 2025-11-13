@@ -32,7 +32,7 @@ def get_app_directory(root: Path = None) -> Path:
 
 
 def get_uv_path() -> Path:
-    brew = Path("/usr/homebrew/bin/uv")
+    brew = Path("/opt/homebrew/bin/uv")
     if brew.exists():
         return brew
 
