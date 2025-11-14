@@ -413,7 +413,7 @@ def publish(
         print("Done!")
         raise typer.Exit(0)
 
-    if app_config.type == "PRO":
+    if app_config.type in ("PRO", "REP"):
         print("\nBuilding package.zip for upload...")
         shell_run("./build.sh", cwd=root_fp)
         print("Uploading package.zip to Doover...")
