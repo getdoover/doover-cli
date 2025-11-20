@@ -2,6 +2,7 @@ import importlib
 import os
 import shutil
 from datetime import timezone, datetime, timedelta
+import tzlocal
 
 import typer
 from typing_extensions import Annotated
@@ -29,13 +30,17 @@ def compose(
     package_path: Annotated[
         str, Option(help="Path to the python report generator module to compose")
     ] = "pydoover.reports.xlsx_base",
+    # default to local timezone
+    local_tz_name: Annotated[
+        str, Option(help="Timezone to run the report in")
+    ] = "",
     _profile: ProfileAnnotation = None,
 ):
     """
     Compose a report locally.
 
     Example Usage:
-    doover report compose --agent_ids "abcdefg,abdfgds" --agent_names "Agent 1,Agent 2"
+    doover report compose --agent_ids "abcdefg,abdfgds" --agent_names "Agent 1,Agent 2" --period_from "2025-11-16T00:08:00" --period_to "2025-11-17T00:08:00" --package_path "pydoover.reports.xlsx_base" --local_tz_name "Asia/Riyadh"
     """
 
     if isinstance(agent_ids, str):
@@ -73,7 +78,8 @@ def compose(
     os.makedirs(tmp_workspace)
 
     # Get the local timezone as a pytz object
-    local_tz_name = tzlocal.get_localzone_name()
+    if local_tz_name is None:
+        local_tz_name = tzlocal.get_localzone_name()
     for_timezone = pytz.timezone(local_tz_name)
 
     def progress_update(progress: int):
