@@ -2,7 +2,6 @@ import importlib
 import os
 import shutil
 from datetime import timezone, datetime, timedelta
-import tzlocal
 
 import typer
 from typing_extensions import Annotated
@@ -78,7 +77,7 @@ def compose(
     os.makedirs(tmp_workspace)
 
     # Get the local timezone as a pytz object
-    if local_tz_name is None:
+    if not local_tz_name:
         local_tz_name = tzlocal.get_localzone_name()
     for_timezone = pytz.timezone(local_tz_name)
 
