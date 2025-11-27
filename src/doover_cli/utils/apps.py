@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 import typer
+import questionary
 
 from pydoover.cloud.api.application import Application
 
@@ -78,13 +79,29 @@ def get_app_config(root_fp: Path) -> Application:
     with open(config_path, "r") as file:
         data = json.load(file)
 
+    result = []
     for k, v in data.items():
         if isinstance(v, dict) and "config_schema" in v:
             # config_schema bit of a prerequisite for an app config entry.
-            return Application.from_config(v, root_fp)
+            result.append(Application.from_config(v, root_fp))
 
-    print(
-        f"No application configuration found in the `doover_config.json` file at {root_fp}. "
-        f"Make sure the `type` is set to `application` in the configuration."
-    )
-    raise typer.Exit(1)
+    if len(result) == 0:
+        print(
+            f"No application configuration found in the `doover_config.json` file at {root_fp}. "
+            f"Make sure the `type` is set to `application` in the configuration."
+        )
+        raise typer.Exit(1)
+    elif len(result) == 1:
+        return result[0]
+    elif len(result) > 1:
+        lookup = {r.name: r for r in result}
+        choice = questionary.select(
+            "Multiple application configurations found. Please select one:",
+            choices=list(lookup.keys()),
+        ).ask()
+        return lookup[choice]
+
+        # raise ValueError(
+        #     f"Multiple application configurations found in the `doover_config.json` file at {root_fp}. "
+        #     "Make sure the `type` is set to `application` in the configuration."
+        # )
