@@ -386,15 +386,24 @@ def publish(
     else:
         is_staging = staging
 
-    app_id = app_config.staging_config.get("id") if is_staging else app_config.id
+    if state.api.is_doover2:
+        id_key = "id"
+    else:
+        id_key = "key"
+
+    app_id = (
+        app_config.staging_config.get(id_key)
+        if is_staging
+        else getattr(app_config, id_key)
+    )
 
     try:
         if app_id is None:
             app_id = state.api.create_application(app_config, is_staging=is_staging)
             if is_staging:
-                app_config.staging_config["id"] = app_id
+                app_config.staging_config[id_key] = app_id
             else:
-                app_config.id = app_id
+                setattr(app_config, id_key, app_id)
 
             app_config.save_to_disk()
             print(f"Created new application with id: {app_id}")

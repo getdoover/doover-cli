@@ -141,7 +141,9 @@ def generate(
         except KeyError:
             continue
 
-        output = jsf.JSF(schema).generate(use_defaults=True, use_examples=True)
+        output = jsf.JSF(schema, allow_none_optionals=0.0).generate(
+            use_defaults=True, use_examples=True
+        )
         output = json.dumps(output, indent=4)
         if output_fp:
             output_fp.write_text(output)
