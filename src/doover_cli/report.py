@@ -6,7 +6,7 @@ from datetime import timezone, datetime, timedelta
 import typer
 from typing_extensions import Annotated
 
-from typer import Argument, Typer
+from typer import Typer, Option
 
 from .utils.api import ProfileAnnotation
 from .utils.state import state
@@ -17,17 +17,17 @@ app = Typer(no_args_is_help=True)
 @app.command()
 def compose(
     period_from: Annotated[
-        datetime, Argument(help="Start of the period to report on")
+        datetime, Option(help="Start of the period to report on")
     ] = datetime.now() - timedelta(days=7),
     period_to: Annotated[
-        datetime, Argument(help="End of the period to report on")
+        datetime, Option(help="End of the period to report on")
     ] = None,
-    agent_ids: Annotated[str, Argument(help="Agent IDs to run the report on")] = "",
+    agent_ids: Annotated[str, Option(help="Agent IDs to run the report on")] = "",
     agent_names: Annotated[
-        str, Argument(help="Agent display names to run the report on")
+        str, Option(help="Agent display names to run the report on")
     ] = "",
     package_path: Annotated[
-        str, Argument(help="Path to the python report generator module to compose")
+        str, Option(help="Path to the python report generator module to compose")
     ] = "pydoover.reports.xlsx_base",
     _profile: ProfileAnnotation = None,
 ):

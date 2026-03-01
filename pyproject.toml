@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "click<8.2.0",
     "click-prompt>=0.6.3",
+    "prompt-toolkit==3.0.51",
     "docker>=7.1.0",
     "jsf>=0.11.2",
     "paramiko>=3.5.1",
