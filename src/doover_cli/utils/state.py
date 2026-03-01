@@ -1,4 +1,4 @@
-from pydoover.cloud.api import Client, ConfigManager
+from pydoover.cloud.api import Client, ConfigManager, Agent
 
 from .api import setup_api
 
@@ -26,7 +26,11 @@ class State:
         if self._api is None:
             self._api, agent = setup_api(self.agent_query, self.config_manager)
             self.agent = agent
-            self.agent_id = self.api.agent_id = agent.key
+            if isinstance(agent, int):
+                self.agent_id = agent
+            elif isinstance(agent, Agent):
+                self.agent_id = agent.id
+            # self.agent_id = self.api.agent_id = agent.id
         return self._api
 
 

@@ -206,6 +206,7 @@ def create(
             # git repos default to "main" rather than "latest" (dockerhub).
             "image_name": f"{container_registry}/{name_as_path}:{'main' if container_registry.startswith('ghcr') else 'latest'}",
             "owner_org_key": owner_org_key or "FIX-ME",
+            "organisation_id": owner_org_key or "FIX-ME",
             "container_registry_profile_key": container_profile_key or "FIX-ME",
         }
     )
@@ -379,22 +380,33 @@ def publish(
     )
 
     if staging is None:
-        is_staging = ".d.doover" in state.api.base_url
+        is_staging = (
+            ".d.doover" in state.api.base_url or "staging" in state.api.base_url
+        )
     else:
         is_staging = staging
 
-    key = app_config.staging_config.get("key") if is_staging else app_config.key
+    if state.api.is_doover2:
+        id_key = "id"
+    else:
+        id_key = "key"
+
+    app_id = (
+        app_config.staging_config.get(id_key)
+        if is_staging
+        else getattr(app_config, id_key)
+    )
 
     try:
-        if key is None:
-            key = state.api.create_application(app_config, is_staging=is_staging)
+        if app_id is None:
+            app_id = state.api.create_application(app_config, is_staging=is_staging)
             if is_staging:
-                app_config.staging_config["key"] = key
+                app_config.staging_config[id_key] = app_id
             else:
-                app_config.key = key
+                setattr(app_config, id_key, app_id)
 
             app_config.save_to_disk()
-            print(f"Created new application with key: {key}")
+            print(f"Created new application with id: {app_id}")
         else:
             state.api.update_application(app_config, is_staging=is_staging)
     except HTTPException as e:
@@ -409,6 +421,21 @@ def publish(
     if skip_container is True:
         print("User requested to skip container build and push. Skipping...")
         print("Done!")
+        raise typer.Exit(0)
+
+    if app_config.type in ("PRO", "REP", "INT"):
+        print("\nBuilding package.zip for upload...")
+        shell_run("./build.sh", cwd=root_fp)
+        print("Uploading package.zip to Doover...")
+        state.api.publish_processor_source(
+            app_id, (root_fp / "package.zip").read_bytes()
+        )
+        print("Done!")
+
+        print("Creating new lambda version release...")
+        state.api.create_processor_version(app_id)
+        print("Done!")
+
         raise typer.Exit(0)
 
     print("\nApp updated. Now pushing the image to the registry...\n")

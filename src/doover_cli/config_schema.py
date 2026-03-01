@@ -36,7 +36,13 @@ def export(
 ):
     """Export the application configuration to the doover config json file."""
     if config_fp is None:
-        call_with_uv("export-config", in_shell=True)
+        root_fp = get_app_directory(app_fp)
+        app_config = get_app_config(root_fp)
+        call_with_uv(
+            app_config.export_config_command or "export-config",
+            in_shell=True,
+            cwd=app_fp,
+        )
     else:
         config = get_app_config(app_fp)
         call_with_uv(config.src_directory / "app_config.py", in_shell=True)
@@ -135,7 +141,9 @@ def generate(
         except KeyError:
             continue
 
-        output = jsf.JSF(schema).generate(use_defaults=True, use_examples=True)
+        output = jsf.JSF(schema, allow_none_optionals=0.0).generate(
+            use_defaults=True, use_examples=True
+        )
         output = json.dumps(output, indent=4)
         if output_fp:
             output_fp.write_text(output)

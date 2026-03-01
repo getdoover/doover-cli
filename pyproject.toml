@@ -1,6 +1,6 @@
 [project]
 name = "doover-cli"
-version = "0.1.9a1"
+version = "0.2.0"
 description = "CLI for Doover"
 requires-python = ">=3.11"
 dependencies = [
@@ -17,6 +17,7 @@ dependencies = [
     "typer==0.15.1",
     "tzlocal>=5.3.1",
     "xlsxwriter>=3.2.3",
+    "prompt-toolkit==3.0.51",
 ]
 
 [build-system]
@@ -31,3 +32,6 @@ dev = [
     "pre-commit>=4.2.0",
     "pytest>=8.3.5",
 ]
+
+[tool.uv.sources]
+pydoover = { git = "https://github.com/getdoover/pydoover", branch = "doover-2" }

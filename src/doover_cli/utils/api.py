@@ -87,6 +87,12 @@ def setup_api(agent_id: str, config_manager: ConfigManager, read: bool = True):
         config.base_url,
         agent_id,
         login_callback=lambda: on_api_login(api, config_manager),
+        refresh_token=config.refresh_token,
+        refresh_token_id=config.refresh_token_id,
+        data_base_url=config.base_data_url,
+        auth_server_url=config.auth_server_url,
+        auth_server_client_id=config.auth_server_client_id,
+        is_doover2=config.is_doover2,
     )
 
     if config.token is None or (
@@ -104,6 +110,14 @@ def resolve_agent_query(agent_query: str, api: Client):
     id_match = KEY_MATCH.search(agent_query)
     if id_match:
         return api.get_agent(id_match.group(0))
+
+    try:
+        id_match = int(agent_query)
+    except ValueError:
+        pass
+    else:
+        return id_match
+        return api.get_agent(id_match)
 
     try:
         from fuzzywuzzy import process
