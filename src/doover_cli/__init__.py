@@ -1,5 +1,6 @@
 from typing import Annotated, Optional
 
+import click
 import typer
 
 from pydoover.cloud.api import ConfigManager
@@ -16,6 +17,7 @@ from .grpc import app as grpc_app
 from .login import app as login_app
 from .report import app as reports_app
 from .tunnel import app as tunnels_app
+from .utils import sentry as sentry_utils
 from .utils.state import state
 
 app = typer.Typer(no_args_is_help=True)
@@ -78,4 +80,20 @@ def main():
     """
     Main entry point for the Doover CLI.
     """
-    app()
+    sentry_utils.init_sentry()
+
+    try:
+        app()
+    except click.exceptions.Exit:
+        raise
+    except click.Abort:
+        raise
+    except Exception as exc:
+        sentry_utils._capture_exception(
+            exc,
+            handled=False,
+            command=sentry_utils.current_command_path(),
+        )
+        raise
+    finally:
+        sentry_utils.flush_sentry()

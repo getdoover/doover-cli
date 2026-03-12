@@ -493,7 +493,7 @@ wheels = [
 
 [[package]]
 name = "doover-cli"
-version = "0.1.9a1"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -506,6 +506,7 @@ dependencies = [
     { name = "pytz" },
     { name = "questionary" },
     { name = "requests" },
+    { name = "sentry-sdk" },
     { name = "typer" },
     { name = "tzlocal" },
     { name = "xlsxwriter" },
@@ -529,6 +530,7 @@ requires-dist = [
     { name = "pytz", specifier = ">=2025.2" },
     { name = "questionary", specifier = ">=1.10.0" },
     { name = "requests", specifier = ">=2.32.3" },
+    { name = "sentry-sdk", specifier = ">=2,<3" },
     { name = "typer", specifier = "==0.15.1" },
     { name = "tzlocal", specifier = ">=5.3.1" },
     { name = "xlsxwriter", specifier = ">=3.2.3" },
@@ -1504,6 +1506,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/9f/80/d7449656d45a776b7a443ce3af4eb97c4debe416a1a80f60311c7cfd02ff/rstr-3.2.2.tar.gz", hash = "sha256:c4a564d4dfb4472d931d145c43d1cf1ad78c24592142e7755b8866179eeac012", size = 13560, upload-time = "2023-10-11T20:07:57.422Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c8/8c/a0f14f2fcdd846839c478048032b2fc93293deaa936ff6751f27dcf50995/rstr-3.2.2-py3-none-any.whl", hash = "sha256:f39195d38da1748331eeec52f1276e71eb6295e7949beea91a5e9af2340d7b3b", size = 10030, upload-time = "2023-10-11T20:07:55.873Z" },
+]
+
+[[package]]
+name = "sentry-sdk"
+version = "2.54.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "certifi" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c8/e9/2e3a46c304e7fa21eaa70612f60354e32699c7102eb961f67448e222ad7c/sentry_sdk-2.54.0.tar.gz", hash = "sha256:2620c2575128d009b11b20f7feb81e4e4e8ae08ec1d36cbc845705060b45cc1b", size = 413813, upload-time = "2026-03-02T15:12:41.355Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/53/39/be412cc86bc6247b8f69e9383d7950711bd86f8d0a4a4b0fe8fad685bc21/sentry_sdk-2.54.0-py2.py3-none-any.whl", hash = "sha256:fd74e0e281dcda63afff095d23ebcd6e97006102cdc8e78a29f19ecdf796a0de", size = 439198, upload-time = "2026-03-02T15:12:39.546Z" },
 ]
 
 [[package]]

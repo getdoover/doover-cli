@@ -13,6 +13,7 @@ from typer import Typer
 
 from .utils.api import setup_api
 from .utils.prompt import QuestionaryPromptCommand
+from .utils.sentry import capture_handled_exception
 from .utils.state import state
 
 app = Typer(no_args_is_help=True)
@@ -50,6 +51,11 @@ def login(
         print("Login failed. Please try again.")
         if state.debug:
             raise e
+        capture_handled_exception(
+            e,
+            command="login",
+            message="Login failed. Please try again.",
+        )
         raise typer.Exit(1)
 
     state.config_manager.write()
@@ -111,14 +117,29 @@ def configure_token(
     setup_api(state.agent_id, state.config_manager, read=False)
     try:
         state.api.get_agent(state.agent_id)
-    except Forbidden:
+    except Forbidden as e:
         print("Agent token was incorrect. Please try again.")
+        capture_handled_exception(
+            e,
+            command="login.configure_token",
+            message="Agent token was incorrect. Please try again.",
+        )
         raise typer.Exit(1)
-    except NotFound:
+    except NotFound as e:
         print("Agent ID or Base URL was incorrect. Please try again.")
+        capture_handled_exception(
+            e,
+            command="login.configure_token",
+            message="Agent ID or Base URL was incorrect. Please try again.",
+        )
         raise typer.Exit(1)
-    except Exception:
+    except Exception as e:
         print("Base URL was incorrect. Please try again.")
+        capture_handled_exception(
+            e,
+            command="login.configure_token",
+            message="Base URL was incorrect. Please try again.",
+        )
         raise typer.Exit(1)
     else:
         state.config_manager.write()
