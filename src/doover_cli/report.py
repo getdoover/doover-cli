@@ -9,6 +9,7 @@ from typing_extensions import Annotated
 from typer import Typer, Option
 
 from .utils.api import ProfileAnnotation
+from .utils.sentry import capture_handled_exception
 from .utils.state import state
 
 app = Typer(no_args_is_help=True)
@@ -101,6 +102,11 @@ def compose(
         report_instance.generate()
     except Exception as e:
         print(f"Error during report generation: {e}")
+        capture_handled_exception(
+            e,
+            command="report.compose",
+            message=f"Error during report generation: {e}",
+        )
         raise typer.Exit(code=1)
 
     print("Report composed successfully!")

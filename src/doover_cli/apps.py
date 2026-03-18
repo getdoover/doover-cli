@@ -24,6 +24,7 @@ import questionary
 from .utils.api import ProfileAnnotation
 from .utils.apps import get_app_directory, call_with_uv, get_docker_path, get_app_config
 from .utils.prompt import QuestionaryPromptCommand
+from .utils.sentry import capture_handled_exception
 from .utils.state import state
 from .utils.shell_commands import run as shell_run
 
@@ -411,6 +412,11 @@ def publish(
             state.api.update_application(app_config, is_staging=is_staging)
     except HTTPException as e:
         print(f"Failed to update application: {e}")
+        capture_handled_exception(
+            e,
+            command="app.publish",
+            message=f"Failed to update application: {e}",
+        )
         raise typer.Exit(1)
 
     if app_config.build_args == "NO_BUILD":

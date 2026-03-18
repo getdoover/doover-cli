@@ -12,6 +12,7 @@ from typer import Argument, Option, Typer
 
 from .utils import parsers
 from .utils.formatters import format_channel_info
+from .utils.sentry import capture_handled_exception
 from .utils.state import state
 from .utils.api import ProfileAnnotation, AgentAnnotation
 
@@ -34,6 +35,11 @@ def get(
             print("Channel not found. Is it owned by this agent?")
             if state.debug:
                 raise e
+            capture_handled_exception(
+                e,
+                command="channel.get",
+                message="Channel not found. Is it owned by this agent?",
+            )
             raise typer.Exit(1)
 
     print(format_channel_info(channel))
