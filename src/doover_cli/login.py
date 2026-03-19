@@ -30,6 +30,11 @@ def login(
         print("Login failed. Please try again.")
         if state.debug:
             raise
+        capture_handled_exception(
+            exc,
+            command="login",
+            message="Login failed. Please try again.",
+        )
         raise typer.Exit(1) from exc
 
     auth.persist_profile(profile_name, state.config_manager)
