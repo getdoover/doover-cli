@@ -3,7 +3,7 @@ from typing import Annotated, Optional
 import click
 import typer
 
-from pydoover.cloud.api import ConfigManager
+from pydoover.api.auth import ConfigManager
 
 from .apps import app as apps_app
 from .config_schema import app as config_schema_app
@@ -68,8 +68,10 @@ def load_ctx(
         Optional[bool], typer.Option("--version", callback=version_callback)
     ] = None,
 ):
-    state.agent_query = None
+    state.agent_id = None
+    state.profile_name = "default"
     state.config_manager = ConfigManager("default")
+    state._session = None
     state.debug = debug
     state.json = json
 

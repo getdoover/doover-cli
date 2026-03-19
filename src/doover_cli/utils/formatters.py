@@ -1,7 +1,5 @@
 import json
 
-from pydoover.cloud.api.channel import Task
-
 from .state import state
 
 
@@ -22,22 +20,24 @@ def format_channel_info(channel):
     if state.json:
         return json.dumps(channel.to_dict(), indent=4)
 
+    channel_key = f"{channel.owner_id}:{channel.name}"
+    aggregate = channel.aggregate.to_dict() if channel.aggregate is not None else None
     fmt = f"""
     Channel Name: {channel.name}
     Channel Type: {str(channel.__class__.__name__)}
-    Channel ID: {channel.id}
-
-    Agent ID: {channel.agent_id}
+    Channel Key: {channel_key}
+    Agent ID: {channel.owner_id}
+    Private: {channel.is_private}
     """
-    # Agent Name: {channel.fetch_agent()}
-
-    if isinstance(channel, Task) and channel.processor_id is not None:
-        proc = channel.fetch_processor()
+    if channel.message_schema is not None:
         fmt += f"""
-    Processor ID: {channel.processor_id}
-    Processor Name: {proc.name}
+    Message Schema: {json.dumps(channel.message_schema, indent=4)}
+    """
+    if channel.aggregate_schema is not None:
+        fmt += f"""
+    Aggregate Schema: {json.dumps(channel.aggregate_schema, indent=4)}
     """
     fmt += f"""
-    Aggregate: {json.dumps(channel.aggregate, indent=4)}
+    Aggregate: {json.dumps(aggregate, indent=4)}
     """
     return fmt

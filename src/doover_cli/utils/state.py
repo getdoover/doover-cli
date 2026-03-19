@@ -1,37 +1,26 @@
-from pydoover.cloud.api import Client, ConfigManager, Agent
+from pydoover.api.auth import ConfigManager
 
-from .api import setup_api
+from doover_cli.api import DooverCLISession
+
+from .api import setup_session
 
 
 class State:
     def __init__(self):
-        self.agent_query: str | None = None
-        self.agent_id: str | None = None
-        self.agent: str | None = None
+        self.agent_id: int | None = None
+        self.profile_name: str = "default"
 
         self.debug: bool = False
         self.json: bool = False
 
         self.config_manager: ConfigManager | None = None
-        self._api: Client | None = None
+        self._session: DooverCLISession | None = None
 
     @property
-    def api(self):
-        """Allows lazy loading of the API client.
-
-        This means commands are free to use `state.api`, but it is not loaded until that is called.
-
-        Loading can take time, especially if logging in is required.
-        """
-        if self._api is None:
-            self._api, agent = setup_api(self.agent_query, self.config_manager)
-            self.agent = agent
-            if isinstance(agent, int):
-                self.agent_id = agent
-            elif isinstance(agent, Agent):
-                self.agent_id = agent.id
-            # self.agent_id = self.api.agent_id = agent.id
-        return self._api
+    def session(self):
+        if self._session is None:
+            self._session = setup_session(self.profile_name, self.config_manager)
+        return self._session
 
 
 # dirty big global variable but it's OK.

@@ -1,11 +1,10 @@
 import os
 import json
 from pathlib import Path
+from typing import Any
 
 import typer
 import questionary
-
-from pydoover.cloud.api.application import Application
 
 from .shell_commands import run
 
@@ -70,7 +69,9 @@ def get_docker_path() -> Path:
     return Path(docker_path)
 
 
-def get_app_config(root_fp: Path) -> Application:
+def get_app_config(root_fp: Path) -> Any:
+    from pydoover.cloud.api.application import Application
+
     config_path = root_fp / "doover_config.json"
     if not config_path.exists():
         print(f"Configuration file not found at {config_path}.")

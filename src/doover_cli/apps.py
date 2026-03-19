@@ -13,7 +13,6 @@ from enum import Enum
 
 import jsonschema.exceptions
 import rich
-from pydoover.cloud.api import HTTPException
 from typing_extensions import Annotated
 
 import requests
@@ -21,11 +20,9 @@ import typer
 import questionary
 
 
-from .utils.api import ProfileAnnotation
+from .utils.api import ProfileAnnotation, exit_for_unsupported_control_command
 from .utils.apps import get_app_directory, call_with_uv, get_docker_path, get_app_config
 from .utils.prompt import QuestionaryPromptCommand
-from .utils.sentry import capture_handled_exception
-from .utils.state import state
 from .utils.shell_commands import run as shell_run
 
 CHANNEL_VIEWER = "https://my.doover.com/channels/dda"
@@ -358,115 +355,8 @@ def publish(
 
     This pushes a built image to the app's docker registry and updates the application on the Doover site.
     """
-    root_fp = get_app_directory(app_fp)
-
-    if export_config is True:
-        from .config_schema import export
-
-        try:
-            ctx.invoke(export, ctx, app_fp=root_fp, validate_=True)
-        except jsonschema.exceptions.SchemaError as e:
-            summary, remainder = str(e).split("\n", 1)
-            rich.print(
-                f"[red]Failed to export application configuration: {summary}[/red]\n{remainder}\n"
-            )
-            typer.confirm("Do you want to continue?", abort=True)
-        else:
-            rich.print("[green]Exported application configuration.[/green]")
-
-    app_config = get_app_config(root_fp)
-
-    print(
-        f"Updating application on doover site ({state.config_manager.current.base_url})...\n"
-    )
-
-    if staging is None:
-        is_staging = (
-            ".d.doover" in state.api.base_url or "staging" in state.api.base_url
-        )
-    else:
-        is_staging = staging
-
-    if state.api.is_doover2:
-        id_key = "id"
-    else:
-        id_key = "key"
-
-    app_id = (
-        app_config.staging_config.get(id_key)
-        if is_staging
-        else getattr(app_config, id_key)
-    )
-
-    try:
-        if app_id is None:
-            app_id = state.api.create_application(app_config, is_staging=is_staging)
-            if is_staging:
-                app_config.staging_config[id_key] = app_id
-            else:
-                setattr(app_config, id_key, app_id)
-
-            app_config.save_to_disk()
-            print(f"Created new application with id: {app_id}")
-        else:
-            state.api.update_application(app_config, is_staging=is_staging)
-    except HTTPException as e:
-        print(f"Failed to update application: {e}")
-        capture_handled_exception(
-            e,
-            command="app.publish",
-            message=f"Failed to update application: {e}",
-        )
-        raise typer.Exit(1)
-
-    if app_config.build_args == "NO_BUILD":
-        print("App requested to not build. Skipping build step.")
-        print("Done!")
-        raise typer.Exit(0)
-
-    if skip_container is True:
-        print("User requested to skip container build and push. Skipping...")
-        print("Done!")
-        raise typer.Exit(0)
-
-    if app_config.type in ("PRO", "REP", "INT"):
-        print("\nBuilding package.zip for upload...")
-        shell_run("./build.sh", cwd=root_fp)
-        print("Uploading package.zip to Doover...")
-        state.api.publish_processor_source(
-            app_id, (root_fp / "package.zip").read_bytes()
-        )
-        print("Done!")
-
-        print("Creating new lambda version release...")
-        state.api.create_processor_version(app_id)
-        print("Done!")
-
-        raise typer.Exit(0)
-
-    print("\nApp updated. Now pushing the image to the registry...\n")
-
-    typer.confirm(
-        f"Do you want to continue? I will build {app_config.image_name} and publish it to the registry.",
-        abort=True,
-    )
-    # import docker
-    #
-    # client = docker.from_env()
-    # try:
-    #     client.images.get(app_config.image_name)
-    # except ImageNotFound:
-    #     typer.confirm(
-    #         f"Image not found with name: {app_config.image_name}. Do you want me to build the image first?",
-    #         abort=True,
-    #     )
-
-    shell_run(
-        f"docker {'buildx' if buildx else ''} build {app_config.build_args} -t {app_config.image_name} {str(root_fp)}"
-    )
-
-    shell_run(f"docker push {app_config.image_name}")
-    print("\n\nDone!")
+    _ = (ctx, app_fp, skip_container, staging, export_config, buildx)
+    exit_for_unsupported_control_command("app.publish")
 
 
 @app.command(
