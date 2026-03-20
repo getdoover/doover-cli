@@ -5,7 +5,7 @@ from pathlib import Path
 
 import typer
 from pydoover.api import NotFoundError
-from pydoover.models.attachment import File
+from pydoover.models.data.attachment import File
 from typer import Argument, Typer
 from typing_extensions import Annotated
 

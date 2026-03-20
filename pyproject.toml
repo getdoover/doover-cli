@@ -4,9 +4,9 @@ version = "0.2.0"
 description = "CLI for Doover"
 requires-python = ">=3.11"
 dependencies = [
-    "click<8.2.0",
+    "click>=8.3.1",
     "click-prompt>=0.6.3",
-    "prompt-toolkit==3.0.51",
+    "prompt-toolkit>=3.0.52",
     "docker>=7.1.0",
     "jsf>=0.11.2",
     "paramiko>=3.5.1",
@@ -15,10 +15,11 @@ dependencies = [
     "questionary>=1.10.0",
     "requests>=2.32.3",
     "sentry-sdk>=2,<3",
-    "typer==0.15.1",
+    "typer==0.24.1",
     "tzlocal>=5.3.1",
     "xlsxwriter>=3.2.3",
-    "prompt-toolkit==3.0.51",
+    "rich>=14.3.3",
+    "textual>=8.1.1",
 ]
 
 [build-system]
