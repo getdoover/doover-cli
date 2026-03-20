@@ -1,26 +1,222 @@
-from pydoover.models.control import ControlModel, ControlPage
-from typing import Any
-import json
-from ._base import RendererBase, normalize_render_data
+from __future__ import annotations
 
+import json
+from typing import Any
+
+from pydoover.models.control import ControlModel, ControlPage
 from rich.console import Console
-from rich import print_json
+from rich.table import Table
+from rich.text import Text
+
+from ._base import RendererBase, normalize_render_data
 
 
 
 class DefaultRenderer(RendererBase):
-    
-    def __init__(self):
+    _MAX_COLUMN_WIDTH = 30
+
+    def __init__(self, console: Console | None = None):
         super().__init__()
-        self.console = Console()
-    
+        self.console = console or Console()
+
     def loading(self, message: str):
         return self.console.status(message)
-    
+
     def render_list(self, data: list[Any] | ControlPage[Any]) -> None:
-        print_json(json.dumps(normalize_render_data(data), indent=4))
-    
+        if isinstance(data, ControlPage):
+            rows = list(data.results)
+            caption = self._format_page_caption(data)
+        else:
+            rows = list(data)
+            caption = None
+        self._render_rows(rows, caption=caption)
+
     def render(self, data: dict[str, Any] | ControlModel) -> None:
-        print_json(json.dumps(normalize_render_data(data), indent=4))
-        
-    
+        self._render_rows([data])
+
+    def _render_rows(self, items: list[Any], *, caption: str | None = None) -> None:
+        if not items:
+            self.console.print("[dim]No results[/dim]")
+            if caption:
+                self.console.print(f"[dim]{caption}[/dim]")
+            return
+
+        rows = [self._normalize_row(item) for item in items]
+        columns = self._collect_columns(items, rows)
+
+        if not columns:
+            self.console.print_json(json.dumps(normalize_render_data(items), indent=4))
+            return
+
+        visible_columns = self._select_visible_columns(columns, rows)
+        omitted_columns = columns[len(visible_columns) :]
+
+        table = self._build_table(
+            columns=visible_columns,
+            rows=rows,
+            caption=self._build_caption(caption, omitted_columns, len(columns)),
+        )
+        self.console.print(table)
+
+    def _normalize_row(self, item: Any) -> dict[str, Any]:
+        if isinstance(item, ControlModel):
+            return {
+                name: value
+                for name in item._field_defs
+                if (value := getattr(item, name, None)) is not None
+            }
+        row = normalize_render_data(item)
+        if isinstance(row, dict):
+            return row
+        return {"value": row}
+
+    def _collect_columns(
+        self,
+        items: list[Any],
+        rows: list[dict[str, Any]],
+    ) -> list[str]:
+        columns: list[str] = []
+        seen: set[str] = set()
+
+        for item, row in zip(items, rows):
+            if isinstance(item, ControlModel):
+                ordered_keys = [name for name in item._field_defs if name in row]
+            else:
+                ordered_keys = list(row.keys())
+
+            for key in ordered_keys:
+                if key not in seen:
+                    columns.append(key)
+                    seen.add(key)
+
+            for key in row.keys():
+                if key not in seen:
+                    columns.append(key)
+                    seen.add(key)
+
+        return columns
+
+    def _select_visible_columns(
+        self,
+        columns: list[str],
+        rows: list[dict[str, Any]],
+    ) -> list[str]:
+        visible: list[str] = []
+        for column in columns:
+            candidate = [*visible, column]
+            if not visible or self._estimate_table_width(candidate, rows) <= self.console.width:
+                visible = candidate
+                continue
+            break
+        return visible or columns[:1]
+
+    def _build_table(
+        self,
+        *,
+        columns: list[str],
+        rows: list[dict[str, Any]],
+        caption: str | None = None,
+    ) -> Table:
+        table = Table(caption=caption)
+        for column in columns:
+            table.add_column(
+                column,
+                min_width=min(len(column), self._MAX_COLUMN_WIDTH),
+                no_wrap=True,
+                overflow="ellipsis",
+                max_width=self._MAX_COLUMN_WIDTH,
+            )
+
+        for row in rows:
+            table.add_row(*(self._render_value(row.get(column)) for column in columns))
+
+        return table
+
+    def _build_caption(
+        self,
+        caption: str | None,
+        omitted_columns: list[str],
+        total_columns: int,
+    ) -> str | None:
+        parts = [caption] if caption else []
+        if omitted_columns:
+            parts.append(
+                "Showing "
+                f"{total_columns - len(omitted_columns)} of {total_columns} columns. "
+                f"Omitted: {', '.join(omitted_columns)}"
+            )
+        return "\n".join(parts) if parts else None
+
+    def _format_page_caption(self, page: ControlPage[Any]) -> str:
+        parts = [f"Count: {page.count}"]
+        if page.previous:
+            parts.append(f"Previous: {page.previous}")
+        if page.next:
+            parts.append(f"Next: {page.next}")
+        return " | ".join(parts)
+
+    def _estimate_table_width(
+        self,
+        columns: list[str],
+        rows: list[dict[str, Any]],
+    ) -> int:
+        content_width = sum(self._estimate_column_width(column, rows) for column in columns)
+        border_and_padding_width = (3 * len(columns)) + 1
+        return content_width + border_and_padding_width
+
+    def _estimate_column_width(self, column: str, rows: list[dict[str, Any]]) -> int:
+        values = [self._plain_text_value(row.get(column)) for row in rows]
+        widest_value = max((len(value) for value in values), default=0)
+        return min(self._MAX_COLUMN_WIDTH, max(len(column), widest_value))
+
+    def _render_value(self, value: Any) -> str | Text:
+        if value is None:
+            return ""
+        if isinstance(value, ControlModel):
+            return self._render_resource(value)
+        if isinstance(value, list):
+            return self._render_list(value)
+        if isinstance(value, dict):
+            return json.dumps(value, ensure_ascii=True, separators=(", ", ": "))
+        return str(value)
+
+    def _plain_text_value(self, value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, ControlModel):
+            return self._resource_label(value) or str(getattr(value, "id", "") or "")
+        if isinstance(value, list):
+            return ", ".join(self._plain_text_value(item) for item in value)
+        if isinstance(value, dict):
+            return json.dumps(value, ensure_ascii=True, separators=(", ", ": "))
+        return str(value)
+
+    def _render_resource(self, value: ControlModel) -> Text:
+        label = self._resource_label(value)
+        if not label:
+            label = str(getattr(value, "id", "") or (getattr(value, "_model_name", None) or type(value).__name__))
+        return Text(label, style="bold blue")
+
+    def _render_list(self, value: list[Any]) -> str | Text:
+        if any(isinstance(item, ControlModel) for item in value):
+            parts: list[str | Text] = []
+            for index, item in enumerate(value):
+                if index:
+                    parts.append(", ")
+                parts.append(self._render_value(item))
+            return Text.assemble(*parts)
+        return ", ".join(self._plain_text_value(item) for item in value)
+
+    def _resource_label(self, value: ControlModel) -> str | None:
+        for field_name in ("display_name", "name", "username", "email"):
+            field_value = getattr(value, field_name, None)
+            if field_value:
+                return str(field_value)
+
+        first_name = getattr(value, "first_name", None)
+        last_name = getattr(value, "last_name", None)
+        full_name = " ".join(part for part in (first_name, last_name) if part)
+        if full_name:
+            return full_name
+
+        return None
