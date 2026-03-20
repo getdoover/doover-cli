@@ -1,3 +1,4 @@
+from doover_cli.renderer import Renderer
 from typing import Annotated, Optional
 
 import click
@@ -5,14 +6,14 @@ import typer
 
 from pydoover.api.auth import ConfigManager
 
-from .apps import app as apps_app
+from .apps.apps import app as apps_app
 from .config_schema import app as config_schema_app
 from .simulator import app as simulators_app
 from .agent import app as agents_app
 from .channel import app as channels_app
 from .doover_config import app as doover_config_app
 from .dda_logs import app as dda_logs_app
-from .device_type import app as device_type_app
+from .apps.device_type import app as device_type_app
 from .grpc import app as grpc_app
 from .login import app as login_app
 from .report import app as reports_app
@@ -64,6 +65,9 @@ def load_ctx(
     json: Annotated[
         bool, typer.Option(help="Set flag to output results in json format")
     ] = False,
+    render: Annotated[
+        Renderer, typer.Option(help="Set flag to output results in json format")
+    ] = Renderer.default,
     version: Annotated[
         Optional[bool], typer.Option("--version", callback=version_callback)
     ] = None,
@@ -73,7 +77,11 @@ def load_ctx(
     state.config_manager = ConfigManager("default")
     state._session = None
     state.debug = debug
-    state.json = json
+    
+    if render is not None and json:
+        raise typer.BadParameter("Cannot use --json and --renderer together.")
+    
+    state.renderer_name = render
 
     # return ctx.invoke(ctx.obj, *args, **kwargs)
 

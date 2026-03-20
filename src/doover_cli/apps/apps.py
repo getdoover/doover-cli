@@ -20,10 +20,10 @@ import typer
 import questionary
 
 
-from .utils.api import ProfileAnnotation, exit_for_unsupported_control_command
-from .utils.apps import get_app_directory, call_with_uv, get_docker_path, get_app_config
-from .utils.prompt import QuestionaryPromptCommand
-from .utils.shell_commands import run as shell_run
+from ..utils.api import ProfileAnnotation, exit_for_unsupported_control_command
+from ..utils.apps import get_app_directory, call_with_uv, get_docker_path, get_app_config
+from ..utils.prompt import QuestionaryPromptCommand
+from ..utils.shell_commands import run as shell_run
 
 CHANNEL_VIEWER = "https://my.doover.com/channels/dda"
 TEMPLATE_REPO = "https://api.github.com/repos/getdoover/app-template/tarball/main"

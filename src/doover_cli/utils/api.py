@@ -51,7 +51,6 @@ def agent_callback(value: str | None):
 ProfileAnnotation = Annotated[
     str,
     Option(
-        "--profile",
         help="Config profile to use for this request.",
         callback=profile_callback,
     ),

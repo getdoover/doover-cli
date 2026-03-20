@@ -78,7 +78,7 @@ def _capture_exception(
         if command:
             scope.set_tag("command", command)
         scope.set_tag("debug", str(state.debug).lower())
-        scope.set_tag("json_output", str(state.json).lower())
+        scope.set_tag("renderer", str(state.renderer_name).lower())
 
         config_manager = state.config_manager
         if config_manager is not None and config_manager.current_profile:

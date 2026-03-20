@@ -1,12 +1,12 @@
+from cfgv import Not
 import os
 
 import typer
 
-from pydoover.api import DataClient
+from pydoover.api import DataClient, ControlClient
 from pydoover.api.auth import ConfigManager
 
 from .auth import DooverCLIAuthClient
-from .errors import ControlClientUnavailableError
 
 
 class DooverCLISession:
@@ -23,6 +23,7 @@ class DooverCLISession:
         self.auth = auth
         self.control_client = control_client
         self._data_client: DataClient | None = None
+        self._control_client: ControlClient | None = None
 
     @classmethod
     def from_profile(
@@ -72,12 +73,12 @@ class DooverCLISession:
         if self._data_client is None:
             self._data_client = DataClient(auth=self.auth)
         return self._data_client
-
-    def require_control_client(self, command_name: str):
-        if self.control_client is None:
-            raise ControlClientUnavailableError(command_name)
-        return self.control_client
-
+    
+    def get_control_client(self) -> ControlClient:
+        if self._control_client is None:
+            self._control_client = ControlClient(auth=self.auth)
+        return self._control_client
+    
     def require_agent_id(self, agent_id: int | str | None) -> int:
         if agent_id is None:
             raise typer.BadParameter(
@@ -96,4 +97,5 @@ class DooverCLISession:
     def resolve_agent_query(self, agent_query: str | None):
         if agent_query is None:
             return None
-        self.require_control_client("agent lookup")
+        raise NotImplementedError()
+        # self.get_control_client().agents

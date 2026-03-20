@@ -264,7 +264,7 @@ def test_removed_configure_token_command():
     result = runner.invoke(app, ["configure-token"])
 
     assert result.exit_code != 0
-    assert "No such command" in result.stdout
+    assert "No such command" in result.output
 
 
 def test_unsupported_control_command_reports_handled_exception(monkeypatch):

@@ -26,4 +26,5 @@ def reset_cli_state(monkeypatch):
     state.debug = False
     state.json = False
     state.config_manager = None
+    state._renderer = None
     state._session = None
