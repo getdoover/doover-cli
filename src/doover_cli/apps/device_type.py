@@ -4,8 +4,10 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 import questionary
 import typer
+from pydoover.models.control import DeviceType
 
 from ..utils import parsers
+from ..utils.crud import build_create_command_callback
 from ..utils.api import ProfileAnnotation, exit_for_unsupported_control_command
 from ..utils.state import state
 
@@ -41,62 +43,6 @@ def _parse_optional_bool(value: str | None, option_name: str) -> bool | None:
     raise typer.BadParameter(
         f"{option_name} must be one of: true, false, 1, 0, yes, no."
     )
-
-
-def _stringify_prompt_default(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, Path):
-        return str(value)
-    return str(value)
-
-
-def _prompt_optional_text(message: str, default: Any = None) -> str | None:
-    answer = questionary.text(
-        message,
-        default=_stringify_prompt_default(default),
-    ).unsafe_ask()
-    if answer is None:
-        raise typer.Abort()
-
-    stripped = answer.strip()
-    if not stripped:
-        return None
-    return stripped
-
-
-def _prompt_required_text(message: str, default: Any = None) -> str:
-    answer = questionary.text(
-        message,
-        default=_stringify_prompt_default(default),
-        validate=lambda value: bool(value.strip()) or "This field is required.",
-    ).unsafe_ask()
-    if answer is None:
-        raise typer.Abort()
-    return answer.strip()
-
-
-def _prompt_optional_int(message: str, default: int | None = None) -> int | None:
-    answer = questionary.text(
-        message,
-        default=_stringify_prompt_default(default),
-        validate=lambda value: (
-            True
-            if not value.strip()
-            else (
-                True
-                if value.strip().lstrip("-").isdigit()
-                else "Please enter an integer or leave this blank."
-            )
-        ),
-    ).unsafe_ask()
-    if answer is None:
-        raise typer.Abort()
-
-    stripped = answer.strip()
-    if not stripped:
-        return None
-    return int(stripped)
 
 
 def _load_solution_choices(client: "ControlClient") -> list[questionary.Choice]:
@@ -160,57 +106,6 @@ def _prompt_solution_id(client: "ControlClient", default: int | None = None) -> 
     return int(answer.strip())
 
 
-def _prompt_create_fields(
-    client: "ControlClient",
-    *,
-    name: str | None,
-    solution_id: int | None,
-    config: str | None,
-    config_schema: str | None,
-    device_extra_config_schema: str | None,
-    installer: Path | None,
-    installer_info: str | None,
-    copy_command: str | None,
-    description: str | None,
-    logo_url: str | None,
-    extra_info: str | None,
-    stars: int | None,
-    default_icon: str | None,
-) -> dict[str, Any]:
-    prompted_name = _prompt_required_text("Device type name", name)
-    prompted_solution_id = _prompt_solution_id(client, solution_id)
-    prompted_config = _prompt_optional_text("Config JSON", config)
-    prompted_config_schema = _prompt_optional_text("Config schema JSON", config_schema)
-    prompted_device_extra_config_schema = _prompt_optional_text(
-        "Device extra config schema JSON",
-        device_extra_config_schema,
-    )
-    installer_input = _prompt_optional_text("Installer file path", installer)
-    prompted_installer_info = _prompt_optional_text("Installer info", installer_info)
-    prompted_copy_command = _prompt_optional_text("Copy command", copy_command)
-    prompted_description = _prompt_optional_text("Description", description)
-    prompted_logo_url = _prompt_optional_text("Logo URL", logo_url)
-    prompted_extra_info = _prompt_optional_text("Extra info", extra_info)
-    prompted_stars = _prompt_optional_int("Stars", stars)
-    prompted_default_icon = _prompt_optional_text("Default icon", default_icon)
-
-    return {
-        "name": prompted_name,
-        "solution_id": prompted_solution_id,
-        "config": prompted_config,
-        "config_schema": prompted_config_schema,
-        "device_extra_config_schema": prompted_device_extra_config_schema,
-        "installer": Path(installer_input) if installer_input is not None else None,
-        "installer_info": prompted_installer_info,
-        "copy_command": prompted_copy_command,
-        "description": prompted_description,
-        "logo_url": prompted_logo_url,
-        "extra_info": prompted_extra_info,
-        "stars": prompted_stars,
-        "default_icon": prompted_default_icon,
-    }
-
-
 def _build_device_type_payload(
     *,
     name: str | None,
@@ -271,8 +166,8 @@ def _build_device_type_payload(
     return payload
 
 
-@app.command()
-def list(
+@app.command(name="list")
+def list_(
     archived: Annotated[
         str | None,
         typer.Option(
@@ -380,105 +275,16 @@ def get(
     renderer.render(response)
 
 
-@app.command()
-def create(
-    name: Annotated[str | None, typer.Option(help="Device type name.")] = None,
-    solution_id: Annotated[
-        int | None,
-        typer.Option("--solution-id", help="Solution ID to attach the device type to."),
-    ] = None,
-    config: Annotated[
-        str | None, typer.Option(help="Device config JSON payload.")
-    ] = None,
-    config_schema: Annotated[
-        str | None, typer.Option(help="Config schema JSON payload.")
-    ] = None,
-    device_extra_config_schema: Annotated[
-        str | None,
-        typer.Option(
-            "--device-extra-config-schema",
-            help="Device extra config schema JSON payload.",
-        ),
-    ] = None,
-    installer: Annotated[
-        Path | None, typer.Option(help="Path to an installer file to upload.")
-    ] = None,
-    installer_info: Annotated[
-        str | None, typer.Option(help="Installer info string.")
-    ] = None,
-    copy_command: Annotated[
-        str | None, typer.Option(help="Copy command string.")
-    ] = None,
-    description: Annotated[
-        str | None, typer.Option(help="Device type description.")
-    ] = None,
-    logo_url: Annotated[str | None, typer.Option(help="Logo URL.")] = None,
-    extra_info: Annotated[
-        str | None, typer.Option(help="Extra info string.")
-    ] = None,
-    stars: Annotated[int | None, typer.Option(help="Stars count.")] = None,
-    default_icon: Annotated[
-        str | None, typer.Option(help="Default icon name.")
-    ] = None,
-    _profile: ProfileAnnotation = None,
-):
-    """Create a device type."""
-    _ = _profile
-    client, renderer = get_state()
-
-    if name is None or solution_id is None:
-        prompted_values = _prompt_create_fields(
-            client,
-            name=name,
-            solution_id=solution_id,
-            config=config,
-            config_schema=config_schema,
-            device_extra_config_schema=device_extra_config_schema,
-            installer=installer,
-            installer_info=installer_info,
-            copy_command=copy_command,
-            description=description,
-            logo_url=logo_url,
-            extra_info=extra_info,
-            stars=stars,
-            default_icon=default_icon,
-        )
-        name = prompted_values["name"]
-        solution_id = prompted_values["solution_id"]
-        config = prompted_values["config"]
-        config_schema = prompted_values["config_schema"]
-        device_extra_config_schema = prompted_values["device_extra_config_schema"]
-        installer = prompted_values["installer"]
-        installer_info = prompted_values["installer_info"]
-        copy_command = prompted_values["copy_command"]
-        description = prompted_values["description"]
-        logo_url = prompted_values["logo_url"]
-        extra_info = prompted_values["extra_info"]
-        stars = prompted_values["stars"]
-        default_icon = prompted_values["default_icon"]
-
-    payload = _build_device_type_payload(
-        name=name,
-        solution_id=solution_id,
-        config=config,
-        config_schema=config_schema,
-        device_extra_config_schema=device_extra_config_schema,
-        installer=installer,
-        installer_info=installer_info,
-        copy_command=copy_command,
-        description=description,
-        logo_url=logo_url,
-        extra_info=extra_info,
-        stars=stars,
-        default_icon=default_icon,
-        require_name=True,
-        require_solution_id=True,
-    )
-
-    with renderer.loading("Creating device type..."):
-        response = client.devices.types_create(payload)
-
-    renderer.render(response)
+create = build_create_command_callback(
+    model_cls=DeviceType,
+    command_help="Create a device type.",
+    get_state=lambda: get_state(),
+    submit_callback=lambda client, model_instance: client.devices.types_create(
+        model_instance
+    ),
+    resource_prompt_resolvers={"Solution": _prompt_solution_id},
+)
+app.command()(create)
 
 
 @app.command()

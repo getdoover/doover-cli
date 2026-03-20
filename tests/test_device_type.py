@@ -1,6 +1,7 @@
 from contextlib import nullcontext
 from types import SimpleNamespace
 
+from pydoover.models.control import DeviceType
 from typer.testing import CliRunner
 
 from doover_cli import app
@@ -118,7 +119,7 @@ def test_device_type_create_builds_payload(monkeypatch, tmp_path):
         lambda: (FakeControlClient(), renderer),
     )
     monkeypatch.setattr(
-        "doover_cli.apps.device_type._prompt_create_fields",
+        "doover_cli.utils.crud.create._prompt_model_values",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             AssertionError("interactive prompt should not be used")
         ),
@@ -159,7 +160,11 @@ def test_device_type_create_builds_payload(monkeypatch, tmp_path):
     )
 
     assert result.exit_code == 0
-    assert captured["payload"] == {
+    assert isinstance(captured["payload"], DeviceType)
+    assert captured["payload"].to_version(
+        "DeviceTypeSerializerDetailRequest",
+        method="POST",
+    ) == {
         "name": "Tracker",
         "solution_id": 7,
         "config": {"mode": "auto"},
@@ -232,7 +237,7 @@ def test_device_type_create_prompts_for_missing_required_fields(monkeypatch, tmp
         lambda: (FakeControlClient(), renderer),
     )
     monkeypatch.setattr(
-        "doover_cli.apps.device_type.questionary.text",
+        "doover_cli.utils.crud.create.questionary.text",
         lambda *args, **kwargs: FakeQuestion(next(text_answers)),
     )
 
@@ -256,7 +261,11 @@ def test_device_type_create_prompts_for_missing_required_fields(monkeypatch, tmp
     }
     assert captured["select_kwargs"]["use_search_filter"] is True
     assert captured["select_kwargs"]["use_jk_keys"] is False
-    assert captured["payload"] == {
+    assert isinstance(captured["payload"], DeviceType)
+    assert captured["payload"].to_version(
+        "DeviceTypeSerializerDetailRequest",
+        method="POST",
+    ) == {
         "name": "Prompted Tracker",
         "solution_id": 9,
         "config": {"mode": "prompt"},
@@ -288,3 +297,13 @@ def test_device_type_get_renders_response(monkeypatch):
 
     assert result.exit_code == 0
     assert renderer.render_calls == [{"id": 55, "name": "Tracker"}]
+
+
+def test_device_type_create_help_lists_generated_options():
+    result = runner.invoke(app, ["device-type", "create", "--help"])
+
+    assert result.exit_code == 0
+    assert "--name" in result.stdout
+    assert "--solution-id" in result.stdout
+    assert "--config-schema" in result.stdout
+    assert "--installer" in result.stdout
