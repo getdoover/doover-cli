@@ -11,6 +11,7 @@ from typing_extensions import Annotated
 
 from .utils import parsers
 from .utils.api import AgentAnnotation, ProfileAnnotation, exit_for_unsupported_control_command
+from .utils.channel_views import ChannelViewMode, render_channel, resolve_channel_view
 from .utils.formatters import format_channel_info
 from .utils.sentry import capture_handled_exception
 from .utils.state import state
@@ -32,6 +33,14 @@ def _coerce_aggregate_payload(message) -> dict:
 @app.command()
 def get(
     channel_name: Annotated[str, Argument(help="Channel name to get info for")],
+    view: Annotated[
+        ChannelViewMode | None,
+        typer.Option(
+            "--view",
+            help="Output mode: plain, overview, simple, or interactive. ui_state defaults to overview.",
+            case_sensitive=False,
+        ),
+    ] = None,
     _profile: ProfileAnnotation = None,
     _agent: AgentAnnotation = None,
 ):
@@ -51,7 +60,11 @@ def get(
         )
         raise typer.Exit(1) from exc
 
-    print(format_channel_info(channel))
+    if state.json:
+        print(format_channel_info(channel))
+        return
+
+    render_channel(channel, mode=resolve_channel_view(channel_name, view))
 
 
 @app.command()

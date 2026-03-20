@@ -69,6 +69,22 @@ Channel commands on the new API surface require an explicit target agent:
 doover channel get my-channel --agent 12345
 ```
 
+For channel payloads that are hard to read in a plain dump, `channel get` now supports multiple terminal-oriented views:
+
+```bash
+uv run doover channel get ui_state --agent 157338390533018379
+uv run doover channel get ui_state --agent 157338390533018379 --view plain
+uv run doover channel get ui_state --agent 157338390533018379 --view simple
+uv run doover channel get ui_state --agent 157338390533018379 --view interactive
+```
+
+Available `--view` modes:
+
+- `plain`: legacy text output
+- `overview`: Rich panels and a readable tree of aggregate data
+- `simple`: Textual split view with aggregate tree on the left and channel metadata on the right
+- `interactive`: Textual tree explorer with keyboard navigation
+
 ## Error Reporting
 
 The CLI reports exception-based command failures to Sentry by default. It avoids normal control-flow exits such as `--help`, `--version`, and user aborts, and it does not intentionally attach secrets such as API tokens as structured metadata.
