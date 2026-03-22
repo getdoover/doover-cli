@@ -1,9 +1,11 @@
 from contextlib import nullcontext
 from types import SimpleNamespace
 
+import click
 from typer.testing import CliRunner
 
 from doover_cli import app
+from doover_cli.apps import device_type as device_type_app
 
 runner = CliRunner()
 
@@ -21,6 +23,14 @@ class FakeRenderer:
 
     def render_list(self, data):
         self.render_list_calls.append(data)
+
+
+class FakeQuestion:
+    def __init__(self, answer):
+        self.answer = answer
+
+    def unsafe_ask(self):
+        return self.answer
 
 
 def test_device_type_list_passes_all_filters(monkeypatch):
@@ -203,13 +213,6 @@ def test_device_type_create_prompts_for_missing_required_fields(monkeypatch, tmp
         devices = FakeDevicesClient()
         solutions = FakeSolutionsClient()
 
-    class FakeQuestion:
-        def __init__(self, answer):
-            self.answer = answer
-
-        def unsafe_ask(self):
-            return self.answer
-
     text_answers = iter(
         [
             "Prompted Tracker",
@@ -288,3 +291,191 @@ def test_device_type_get_renders_response(monkeypatch):
 
     assert result.exit_code == 0
     assert renderer.render_calls == [{"id": 55, "name": "Tracker"}]
+
+
+def test_device_type_archive_prompts_with_autocomplete_when_id_missing(monkeypatch):
+    captured = {}
+    renderer = FakeRenderer()
+
+    class FakePage:
+        def __init__(self, results):
+            self.results = results
+            self.count = len(results)
+            self.next = None
+
+    class FakeDevicesClient:
+        def types_list(self, **kwargs):
+            captured["list_kwargs"] = kwargs
+            return FakePage(
+                [
+                    SimpleNamespace(id=12, name="Alpha Sensor"),
+                    SimpleNamespace(id=27, name="Beta Tracker"),
+                ]
+            )
+
+        def types_archive(self, device_type_id):
+            captured["archived_id"] = device_type_id
+            return {"id": int(device_type_id), "archived": True}
+
+    class FakeControlClient:
+        devices = FakeDevicesClient()
+
+    monkeypatch.setattr(
+        "doover_cli.apps.device_type.get_state",
+        lambda: (FakeControlClient(), renderer),
+    )
+
+    def fake_autocomplete(*args, **kwargs):
+        captured["autocomplete_args"] = args
+        captured["autocomplete_kwargs"] = kwargs
+        return FakeQuestion("Beta Tracker (27)")
+
+    monkeypatch.setattr(
+        "doover_cli.apps.device_type.questionary.autocomplete",
+        fake_autocomplete,
+    )
+
+    result = runner.invoke(app, ["device-type", "archive"])
+
+    assert result.exit_code == 0
+    assert captured["list_kwargs"] == {
+        "archived": False,
+        "ordering": "name",
+        "page": 1,
+        "per_page": 100,
+    }
+    assert captured["autocomplete_args"] == ("Device type to archive",)
+    assert captured["autocomplete_kwargs"]["choices"] == [
+        "Alpha Sensor (12)",
+        "Beta Tracker (27)",
+    ]
+    assert captured["autocomplete_kwargs"]["match_middle"] is True
+    assert captured["archived_id"] == "27"
+    assert renderer.render_calls == [{"id": 27, "archived": True}]
+
+
+def test_device_type_unarchive_prompts_with_autocomplete_when_id_missing(
+    monkeypatch,
+):
+    captured = {}
+    renderer = FakeRenderer()
+
+    class FakePage:
+        def __init__(self, results):
+            self.results = results
+            self.count = len(results)
+            self.next = None
+
+    class FakeDevicesClient:
+        def types_list(self, **kwargs):
+            captured["list_kwargs"] = kwargs
+            return FakePage([SimpleNamespace(id=91, display_name="Archived Delta")])
+
+        def types_unarchive(self, device_type_id):
+            captured["unarchived_id"] = device_type_id
+            return {"id": int(device_type_id), "archived": False}
+
+    class FakeControlClient:
+        devices = FakeDevicesClient()
+
+    monkeypatch.setattr(
+        "doover_cli.apps.device_type.get_state",
+        lambda: (FakeControlClient(), renderer),
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.device_type.questionary.autocomplete",
+        lambda *args, **kwargs: FakeQuestion("Archived Delta (91)"),
+    )
+
+    result = runner.invoke(app, ["device-type", "unarchive"])
+
+    assert result.exit_code == 0
+    assert captured["list_kwargs"] == {
+        "archived": True,
+        "ordering": "name",
+        "page": 1,
+        "per_page": 100,
+    }
+    assert captured["unarchived_id"] == "91"
+    assert renderer.render_calls == [{"id": 91, "archived": False}]
+
+
+def test_device_type_archive_accepts_name_lookup(monkeypatch):
+    captured = {}
+    renderer = FakeRenderer()
+
+    class FakePage:
+        def __init__(self, results):
+            self.results = results
+            self.count = len(results)
+            self.next = None
+
+    class FakeDevicesClient:
+        def types_list(self, **kwargs):
+            captured["list_kwargs"] = kwargs
+            return FakePage(
+                [
+                    SimpleNamespace(id=12, name="Alpha Sensor"),
+                    SimpleNamespace(id=27, name="Beta Tracker"),
+                ]
+            )
+
+        def types_archive(self, device_type_id):
+            captured["archived_id"] = device_type_id
+            return {"id": int(device_type_id), "archived": True}
+
+    class FakeControlClient:
+        devices = FakeDevicesClient()
+
+    monkeypatch.setattr(
+        "doover_cli.apps.device_type.get_state",
+        lambda: (FakeControlClient(), renderer),
+    )
+
+    result = runner.invoke(app, ["device-type", "archive", "Beta Tracker"])
+
+    assert result.exit_code == 0
+    assert captured["list_kwargs"] == {
+        "archived": False,
+        "ordering": "name",
+        "page": 1,
+        "per_page": 100,
+    }
+    assert captured["archived_id"] == "27"
+    assert renderer.render_calls == [{"id": 27, "archived": True}]
+
+
+def test_complete_active_device_type_lookup_returns_matching_labels(monkeypatch):
+    class FakeDevicesClient:
+        def types_list(self, **kwargs):
+            assert kwargs == {
+                "archived": False,
+                "ordering": "name",
+                "page": 1,
+                "per_page": 100,
+            }
+            return SimpleNamespace(
+                results=[
+                    SimpleNamespace(id=12, name="Alpha Sensor"),
+                    SimpleNamespace(id=27, name="Beta Tracker"),
+                ],
+                count=2,
+                next=None,
+            )
+
+    class FakeControlClient:
+        devices = FakeDevicesClient()
+
+    monkeypatch.setattr(
+        "doover_cli.apps.device_type._get_device_type_completion_client",
+        lambda ctx: FakeControlClient(),
+    )
+
+    items = device_type_app._complete_active_device_type_lookup(
+        click.Context(click.Command("archive")),
+        None,
+        "beta",
+    )
+
+    assert [item.value for item in items] == ["Beta Tracker (27)"]
+    assert items[0].help == "ID 27"

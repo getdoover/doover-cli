@@ -2,11 +2,16 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
+import click
 import questionary
 import typer
 
 from ..utils import parsers
-from ..utils.api import ProfileAnnotation, exit_for_unsupported_control_command
+from ..utils.api import (
+    ProfileAnnotation,
+    exit_for_unsupported_control_command,
+    setup_session,
+)
 from ..utils.state import state
 
 if TYPE_CHECKING:
@@ -126,6 +131,174 @@ def _load_solution_choices(client: "ControlClient") -> list[questionary.Choice]:
     return choices
 
 
+def _load_device_type_choices(
+    client: "ControlClient", *, archived: bool
+) -> list[dict[str, Any]]:
+    page_num = 1
+    choices: list[dict[str, Any]] = []
+
+    while True:
+        page = client.devices.types_list(
+            archived=archived,
+            ordering="name",
+            page=page_num,
+            per_page=100,
+        )
+
+        for device_type in page.results:
+            device_type_id = int(device_type.id)
+            name = getattr(device_type, "name", None)
+            display_name = getattr(device_type, "display_name", None)
+            label = (
+                display_name
+                or name
+                or f"Device type {device_type_id}"
+            )
+            choices.append(
+                {
+                    "id": device_type_id,
+                    "name": name,
+                    "display_name": display_name,
+                    "label": f"{label} ({device_type_id})",
+                }
+            )
+
+        if not page.next or len(choices) >= page.count:
+            break
+        page_num += 1
+
+    return choices
+
+
+def _get_device_type_completion_client(
+    ctx: click.Context | None = None,
+) -> "ControlClient":
+    profile_name = "default"
+    if ctx is not None:
+        profile_name = (
+            ctx.params.get("_profile")
+            or ctx.params.get("profile")
+            or profile_name
+        )
+
+    session = setup_session(profile_name)
+    return session.get_control_client()
+
+
+def _resolve_device_type_lookup_from_choices(
+    choices: list[dict[str, Any]],
+    lookup: str,
+) -> int:
+    stripped = lookup.strip()
+    if not stripped:
+        raise typer.BadParameter("Please provide a device type ID or name.")
+
+    if stripped.lstrip("-").isdigit():
+        return int(stripped)
+
+    exact_label_match = next(
+        (choice["id"] for choice in choices if choice["label"] == stripped),
+        None,
+    )
+    if exact_label_match is not None:
+        return exact_label_match
+
+    lowered_lookup = stripped.casefold()
+    matches = [
+        choice
+        for choice in choices
+        if any(
+            candidate is not None and candidate.casefold() == lowered_lookup
+            for candidate in (
+                choice["name"],
+                choice["display_name"],
+                choice["label"],
+            )
+        )
+    ]
+
+    unique_matches = {choice["id"]: choice for choice in matches}
+    if len(unique_matches) == 1:
+        return next(iter(unique_matches.values()))["id"]
+
+    if len(unique_matches) > 1:
+        matching_labels = ", ".join(
+            sorted(choice["label"] for choice in unique_matches.values())
+        )
+        raise typer.BadParameter(
+            f"Multiple device types match '{lookup}'. Use an ID or one of: {matching_labels}."
+        )
+
+    raise typer.BadParameter(
+        f"No device type found matching '{lookup}'. Use an ID or an exact device type name."
+    )
+
+
+def _complete_device_type_lookup(
+    ctx: click.Context,
+    _param: click.Parameter | None,
+    incomplete: str,
+    *,
+    archived: bool,
+) -> list[click.shell_completion.CompletionItem]:
+    try:
+        client = _get_device_type_completion_client(ctx)
+        choices = _load_device_type_choices(client, archived=archived)
+    except Exception:
+        return []
+
+    lowered_incomplete = incomplete.casefold().strip()
+    completion_items: list[click.shell_completion.CompletionItem] = []
+
+    for choice in choices:
+        searchable_values = (
+            choice["label"],
+            choice["name"],
+            choice["display_name"],
+            str(choice["id"]),
+        )
+        if lowered_incomplete and not any(
+            value is not None and lowered_incomplete in value.casefold()
+            for value in searchable_values
+        ):
+            continue
+
+        completion_items.append(
+            click.shell_completion.CompletionItem(
+                choice["label"],
+                help=f"ID {choice['id']}",
+            )
+        )
+
+    return completion_items
+
+
+def _complete_active_device_type_lookup(
+    ctx: click.Context,
+    param: click.Parameter | None,
+    incomplete: str,
+) -> list[click.shell_completion.CompletionItem]:
+    return _complete_device_type_lookup(
+        ctx,
+        param,
+        incomplete,
+        archived=False,
+    )
+
+
+def _complete_archived_device_type_lookup(
+    ctx: click.Context,
+    param: click.Parameter | None,
+    incomplete: str,
+) -> list[click.shell_completion.CompletionItem]:
+    return _complete_device_type_lookup(
+        ctx,
+        param,
+        incomplete,
+        archived=True,
+    )
+
+
 def _prompt_solution_id(client: "ControlClient", default: int | None = None) -> int:
     choices = _load_solution_choices(client)
 
@@ -158,6 +331,74 @@ def _prompt_solution_id(client: "ControlClient", default: int | None = None) -> 
     if answer is None:
         raise typer.Abort()
     return int(answer.strip())
+
+
+def _prompt_device_type_id(
+    client: "ControlClient",
+    *,
+    action: str,
+    archived: bool,
+    default: int | None = None,
+) -> int:
+    choices = _load_device_type_choices(client, archived=archived)
+
+    if choices:
+        choice_labels = [choice["label"] for choice in choices]
+        default_choice = next(
+            (choice["label"] for choice in choices if choice["id"] == default),
+            "",
+        )
+        answer = questionary.autocomplete(
+            f"Device type to {action}",
+            choices=choice_labels,
+            default=default_choice,
+            match_middle=True,
+            validate=lambda value: _validate_device_type_lookup(choices, value),
+        ).unsafe_ask()
+        if answer is None:
+            raise typer.Abort()
+        return _resolve_device_type_lookup_from_choices(choices, answer)
+
+    answer = questionary.text(
+        "Device type ID",
+        default=_stringify_prompt_default(default),
+        validate=lambda value: (
+            True
+            if value.strip().lstrip("-").isdigit()
+            else "Please enter a valid device type ID."
+        ),
+    ).unsafe_ask()
+    if answer is None:
+        raise typer.Abort()
+    return int(answer.strip())
+
+
+def _validate_device_type_lookup(
+    choices: list[dict[str, Any]], value: str
+) -> bool | str:
+    try:
+        _resolve_device_type_lookup_from_choices(choices, value)
+    except typer.BadParameter as exc:
+        return str(exc)
+    return True
+
+
+def _resolve_device_type_id(
+    client: "ControlClient",
+    lookup: str | None,
+    *,
+    action: str,
+    archived: bool,
+) -> int:
+    if lookup is None:
+        return _prompt_device_type_id(client, action=action, archived=archived)
+
+    stripped_lookup = lookup.strip()
+    if stripped_lookup.lstrip("-").isdigit():
+        return int(stripped_lookup)
+
+    choices = _load_device_type_choices(client, archived=archived)
+    return _resolve_device_type_lookup_from_choices(choices, lookup)
 
 
 def _prompt_create_fields(
@@ -626,12 +867,25 @@ def patch(
 
 @app.command()
 def archive(
-    device_type_id: Annotated[int, typer.Argument(help="Device type ID to archive.")],
+    device_type_id: Annotated[
+        str | None,
+        typer.Argument(
+            help="Device type ID or exact name to archive.",
+            shell_complete=_complete_active_device_type_lookup,
+        ),
+    ] = None,
     _profile: ProfileAnnotation = None,
 ):
     """Archive a device type."""
     _ = _profile
     client, renderer = get_state()
+
+    device_type_id = _resolve_device_type_id(
+        client,
+        device_type_id,
+        action="archive",
+        archived=False,
+    )
 
     with renderer.loading("Archiving device type..."):
         response = client.devices.types_archive(str(device_type_id))
@@ -641,12 +895,25 @@ def archive(
 
 @app.command()
 def unarchive(
-    device_type_id: Annotated[int, typer.Argument(help="Device type ID to unarchive.")],
+    device_type_id: Annotated[
+        str | None,
+        typer.Argument(
+            help="Device type ID or exact name to unarchive.",
+            shell_complete=_complete_archived_device_type_lookup,
+        ),
+    ] = None,
     _profile: ProfileAnnotation = None,
 ):
     """Unarchive a device type."""
     _ = _profile
     client, renderer = get_state()
+
+    device_type_id = _resolve_device_type_id(
+        client,
+        device_type_id,
+        action="unarchive",
+        archived=True,
+    )
 
     with renderer.loading("Unarchiving device type..."):
         response = client.devices.types_unarchive(str(device_type_id))
