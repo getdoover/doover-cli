@@ -307,3 +307,158 @@ def test_device_type_create_help_lists_generated_options():
     assert "--solution-id" in result.stdout
     assert "--config-schema" in result.stdout
     assert "--installer" in result.stdout
+
+
+def test_device_type_update_with_options_patches_payload(monkeypatch):
+    captured = {}
+    renderer = FakeRenderer()
+
+    class FakeDevicesClient:
+        def types_retrieve(self, _device_type_id):
+            raise AssertionError("interactive fetch should not be used")
+
+        def types_partial(self, device_type_id, payload):
+            captured["device_type_id"] = device_type_id
+            captured["payload"] = payload
+            return {"id": 55}
+
+        def types_update(self, _device_type_id, _payload):
+            raise AssertionError("PATCH should be used when available")
+
+    class FakeControlClient:
+        devices = FakeDevicesClient()
+
+    monkeypatch.setattr(
+        "doover_cli.apps.device_type.get_state",
+        lambda: (FakeControlClient(), renderer),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "device-type",
+            "update",
+            "55",
+            "--name",
+            "Updated Tracker",
+            "--solution-id",
+            "7",
+            "--config",
+            '{"mode":"manual"}',
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["device_type_id"] == "55"
+    assert captured["payload"] == {
+        "name": "Updated Tracker",
+        "solution_id": 7,
+        "config": {"mode": "manual"},
+    }
+    assert renderer.render_calls == [{"id": 55}]
+
+
+def test_device_type_update_without_options_fetches_and_prompts(monkeypatch):
+    captured = {}
+    renderer = FakeRenderer()
+
+    class FakePage:
+        def __init__(self, results):
+            self.results = results
+            self.count = len(results)
+            self.next = None
+
+    class FakeSolutionsClient:
+        def list(self, **kwargs):
+            captured["solution_list_kwargs"] = kwargs
+            return FakePage(
+                [
+                    SimpleNamespace(id=9, display_name="Existing Solution"),
+                    SimpleNamespace(id=11, display_name="Field Ops"),
+                ]
+            )
+
+    class FakeDevicesClient:
+        def types_retrieve(self, device_type_id):
+            captured["retrieved_device_type_id"] = device_type_id
+            return SimpleNamespace(
+                name="Tracker",
+                config={"mode": "auto"},
+                config_schema={"type": "object"},
+                solution=SimpleNamespace(id=9, display_name="Existing Solution"),
+            )
+
+        def types_partial(self, device_type_id, payload):
+            captured["patched_device_type_id"] = device_type_id
+            captured["payload"] = payload
+            return {"id": 55, "name": "Updated Tracker"}
+
+        def types_update(self, _device_type_id, _payload):
+            raise AssertionError("PATCH should be used when available")
+
+    class FakeControlClient:
+        devices = FakeDevicesClient()
+        solutions = FakeSolutionsClient()
+
+    class FakeQuestion:
+        def __init__(self, answer):
+            self.answer = answer
+
+        def unsafe_ask(self):
+            return self.answer
+
+    prompt_answers = {
+        "Name": "Updated Tracker",
+        "Config": '{"mode":"manual"}',
+    }
+
+    def fake_text(message, default=None, **kwargs):
+        captured.setdefault("text_prompts", []).append(
+            {"message": message, "default": default, "kwargs": kwargs}
+        )
+        return FakeQuestion(prompt_answers.get(message, default))
+
+    def fake_select(*args, **kwargs):
+        captured["select_kwargs"] = kwargs
+        return FakeQuestion(11)
+
+    monkeypatch.setattr(
+        "doover_cli.apps.device_type.get_state",
+        lambda: (FakeControlClient(), renderer),
+    )
+    monkeypatch.setattr(
+        "doover_cli.utils.crud.create.questionary.text",
+        fake_text,
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.device_type.questionary.select",
+        fake_select,
+    )
+
+    result = runner.invoke(app, ["device-type", "update", "55"])
+
+    assert result.exit_code == 0
+    assert captured["retrieved_device_type_id"] == "55"
+    assert captured["solution_list_kwargs"] == {
+        "archived": False,
+        "ordering": "display_name",
+        "page": 1,
+        "per_page": 100,
+    }
+    assert captured["select_kwargs"]["default"].value == 9
+    assert captured["select_kwargs"]["use_search_filter"] is True
+    assert captured["patched_device_type_id"] == "55"
+    assert captured["payload"] == {
+        "name": "Updated Tracker",
+        "config": {"mode": "manual"},
+        "solution_id": 11,
+    }
+    assert renderer.render_calls == [{"id": 55, "name": "Updated Tracker"}]
+
+
+def test_device_type_help_no_longer_lists_patch_command():
+    result = runner.invoke(app, ["device-type", "--help"])
+
+    assert result.exit_code == 0
+    assert "update" in result.stdout
+    assert "patch" not in result.stdout
