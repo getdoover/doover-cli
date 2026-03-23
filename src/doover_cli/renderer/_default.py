@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
+import questionary
+import typer
 from pydoover.models.control import ControlModel, ControlPage
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
 from ._base import RendererBase, normalize_render_data
+from ..utils import parsers
+from ..utils.crud import _parse_optional_bool
 
 
 
@@ -21,6 +26,12 @@ class DefaultRenderer(RendererBase):
 
     def loading(self, message: str):
         return self.console.status(message)
+
+    def prompt_fields(self, fields):
+        values: dict[str, Any] = {}
+        for field in fields:
+            values[field.key] = self._prompt_field(field)
+        return values
 
     def render_list(self, data: list[Any] | ControlPage[Any]) -> None:
         if isinstance(data, ControlPage):
@@ -220,3 +231,96 @@ class DefaultRenderer(RendererBase):
             return full_name
 
         return None
+
+    def _prompt_field(self, field) -> Any:
+        default = self._stringify_default(field.default)
+
+        if field.kind == "resource" and field.resource_lookup_choices:
+            choice_labels = [choice["label"] for choice in field.resource_lookup_choices]
+            default_choice = next(
+                (
+                    choice["label"]
+                    for choice in field.resource_lookup_choices
+                    if choice["id"] == getattr(field.default, "id", field.default)
+                ),
+                default,
+            )
+            answer = questionary.autocomplete(
+                field.label,
+                choices=choice_labels,
+                default=default_choice,
+                match_middle=field.match_middle,
+                validate=lambda value: self._validate_resource_field(field, value),
+            ).unsafe_ask()
+            if answer is None:
+                raise typer.Abort()
+            return answer
+
+        answer = questionary.text(
+            field.label,
+            default=default,
+            validate=lambda value: self._validate_basic_field(field, value),
+        ).unsafe_ask()
+        if answer is None:
+            raise typer.Abort()
+        return self._coerce_field_value(field, answer)
+
+    @staticmethod
+    def _stringify_default(value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, Path):
+            return str(value)
+        if isinstance(value, (dict, list)):
+            return json.dumps(value)
+        value_id = getattr(value, "id", None)
+        if value_id is not None:
+            return str(value_id)
+        return str(value)
+
+    def _validate_basic_field(self, field, value: str) -> bool | str:
+        stripped = value.strip()
+        if not stripped:
+            return True if not field.required else f"{field.label} is required."
+        if field.kind == "int" and not stripped.lstrip("-").isdigit():
+            return "Please enter an integer."
+        if field.kind == "bool":
+            try:
+                _parse_optional_bool(stripped, field.label)
+            except typer.BadParameter as exc:
+                return str(exc)
+        if field.kind == "json":
+            try:
+                parsers.maybe_json(stripped)
+            except Exception as exc:
+                return str(exc)
+        return True
+
+    def _validate_resource_field(self, field, value: str) -> bool | str:
+        try:
+            from ..utils.crud import _resolve_resource_lookup_from_choices
+
+            _resolve_resource_lookup_from_choices(
+                field.resource_lookup_choices or [],
+                value,
+                model_label=field.resource_model_label or "resource",
+            )
+        except typer.BadParameter as exc:
+            return str(exc)
+        return True
+
+    def _coerce_field_value(self, field, answer: str) -> Any:
+        stripped = answer.strip()
+        if not stripped:
+            return None
+        if field.kind == "int":
+            return int(stripped)
+        if field.kind == "bool":
+            return _parse_optional_bool(stripped, field.label)
+        if field.kind == "json":
+            return parsers.maybe_json(stripped)
+        if field.kind == "path":
+            return Path(stripped)
+        if field.kind == "resource" and stripped.lstrip("-").isdigit():
+            return int(stripped)
+        return stripped

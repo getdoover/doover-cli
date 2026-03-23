@@ -1,7 +1,10 @@
+from types import SimpleNamespace
+
 from rich.console import Console
 from rich.text import Text
 
 from doover_cli.renderer._default import DefaultRenderer
+from doover_cli.utils.crud import Field
 from pydoover.models.control import DeviceType, Organisation, Solution
 from pydoover.models.control._base import ControlField, ControlModel, ControlPage
 
@@ -94,3 +97,75 @@ def test_render_resource_value_uses_bold_blue_text():
     assert isinstance(rendered, Text)
     assert rendered.plain == "Acme Farms"
     assert str(rendered.style) == "bold blue"
+
+
+class FakeQuestion:
+    def __init__(self, answer):
+        self.answer = answer
+
+    def unsafe_ask(self):
+        return self.answer
+
+
+def test_prompt_fields_uses_text_prompt_for_json(monkeypatch):
+    renderer = DefaultRenderer(console=Console(record=True, width=120))
+    captured = {}
+
+    def fake_text(message, default=None, validate=None):
+        captured["message"] = message
+        captured["default"] = default
+        assert validate('{"mode":"auto"}') is True
+        return FakeQuestion('{"mode":"auto"}')
+
+    monkeypatch.setattr("doover_cli.renderer._default.questionary.text", fake_text)
+
+    values = renderer.prompt_fields(
+        [Field(key="config", label="Config", kind="json", required=False, default=None)]
+    )
+
+    assert captured == {"message": "Config", "default": ""}
+    assert values == {"config": {"mode": "auto"}}
+
+
+def test_prompt_fields_uses_autocomplete_for_resource(monkeypatch):
+    renderer = DefaultRenderer(console=Console(record=True, width=120))
+    captured = {}
+
+    def fake_autocomplete(message, choices, default=None, match_middle=None, validate=None):
+        captured["message"] = message
+        captured["choices"] = choices
+        captured["default"] = default
+        captured["match_middle"] = match_middle
+        assert validate("Field Ops (11)") is True
+        return FakeQuestion("Field Ops (11)")
+
+    monkeypatch.setattr(
+        "doover_cli.renderer._default.questionary.autocomplete",
+        fake_autocomplete,
+    )
+
+    values = renderer.prompt_fields(
+        [
+            Field(
+                key="solution",
+                label="Solution",
+                kind="resource",
+                required=True,
+                default=SimpleNamespace(id=9),
+                resource_model_label="solution",
+                resource_lookup_choices=[
+                    {"id": 9, "label": "Existing Solution (9)", "search_values": ("Existing Solution (9)", "9", "Existing Solution")},
+                    {"id": 11, "label": "Field Ops (11)", "search_values": ("Field Ops (11)", "11", "Field Ops")},
+                ],
+                match_middle=True,
+            )
+        ]
+    )
+
+    assert captured == {
+        "message": "Solution",
+        "choices": ["Existing Solution (9)", "Field Ops (11)"],
+        "default": "Existing Solution (9)",
+        "match_middle": True,
+    }
+    assert values == {"solution": "Field Ops (11)"}

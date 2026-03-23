@@ -1,23 +1,34 @@
 from contextlib import nullcontext
+from pathlib import Path
 from types import SimpleNamespace
 
-from pydoover.models.control import DeviceType
 import click
+from pydoover.models.control import DeviceType, Solution
 from typer.testing import CliRunner
 
 from doover_cli import app
 from doover_cli.apps import device_type as device_type_app
+from doover_cli.utils import crud
 
 runner = CliRunner()
 
 
 class FakeRenderer:
-    def __init__(self):
+    def __init__(self, prompt_answers=None):
+        self.prompt_answers = prompt_answers or {}
+        self.prompt_fields_calls = []
         self.render_calls = []
         self.render_list_calls = []
 
     def loading(self, _message):
         return nullcontext()
+
+    def prompt_fields(self, fields):
+        self.prompt_fields_calls.append(fields)
+        return {
+            field.key: self.prompt_answers.get(field.key, field.default)
+            for field in fields
+        }
 
     def render(self, data):
         self.render_calls.append(data)
@@ -26,12 +37,8 @@ class FakeRenderer:
         self.render_list_calls.append(data)
 
 
-class FakeQuestion:
-    def __init__(self, answer):
-        self.answer = answer
-
-    def unsafe_ask(self):
-        return self.answer
+def _resource_methods(**kwargs):
+    return SimpleNamespace(**kwargs)
 
 
 def test_device_type_list_passes_all_filters(monkeypatch):
@@ -116,13 +123,15 @@ def test_device_type_create_builds_payload(monkeypatch, tmp_path):
     installer = tmp_path / "installer.sh"
     installer.write_text("#!/bin/sh\necho ok\n")
 
-    class FakeDevicesClient:
-        def types_create(self, payload):
-            captured["payload"] = payload
-            return {"id": 123}
-
     class FakeControlClient:
-        devices = FakeDevicesClient()
+        def get_control_methods(self, model_cls):
+            assert model_cls is DeviceType
+            return _resource_methods(
+                post=lambda payload: (
+                    captured.setdefault("payload", payload),
+                    {"id": 123},
+                )[-1],
+            )
 
     monkeypatch.setattr(
         "doover_cli.apps.device_type.get_state",
@@ -194,63 +203,51 @@ def test_device_type_create_builds_payload(monkeypatch, tmp_path):
 
 def test_device_type_create_prompts_for_missing_required_fields(monkeypatch, tmp_path):
     captured = {}
-    renderer = FakeRenderer()
     installer = tmp_path / "prompt-installer.sh"
     installer.write_text("#!/bin/sh\necho prompt\n")
-
-    class FakePage:
-        def __init__(self, results):
-            self.results = results
-            self.count = len(results)
-            self.next = None
-
-    class FakeSolutionsClient:
-        def list(self, **kwargs):
-            captured["solution_list_kwargs"] = kwargs
-            return FakePage([SimpleNamespace(id=9, display_name="Field Ops")])
-
-    class FakeDevicesClient:
-        def types_create(self, payload):
-            captured["payload"] = payload
-            return {"id": 456}
+    renderer = FakeRenderer(
+        prompt_answers={
+            "name": "Prompted Tracker",
+            "solution": "Field Ops (9)",
+            "config": '{"mode":"prompt"}',
+            "config_schema": None,
+            "device_extra_config_schema": None,
+            "installer": str(installer),
+            "installer_info": "install.sh",
+            "copy_command": None,
+            "description": "Prompt description",
+            "logo_url": None,
+            "extra_info": None,
+            "stars": 7,
+            "default_icon": None,
+        }
+    )
 
     class FakeControlClient:
-        devices = FakeDevicesClient()
-        solutions = FakeSolutionsClient()
-
-    text_answers = iter(
-        [
-            "Prompted Tracker",
-            '{"mode":"prompt"}',
-            "",
-            "",
-            str(installer),
-            "install.sh",
-            "",
-            "Prompt description",
-            "",
-            "",
-            "7",
-            "",
-        ]
-    )
+        def get_control_methods(self, model_cls):
+            if model_cls is Solution:
+                return _resource_methods(
+                    list=lambda **kwargs: (
+                        captured.setdefault("solution_list_kwargs", kwargs),
+                        SimpleNamespace(
+                            results=[SimpleNamespace(id=9, display_name="Field Ops")],
+                            count=1,
+                            next=None,
+                        ),
+                    )[-1]
+                )
+            if model_cls is DeviceType:
+                return _resource_methods(
+                    post=lambda payload: (
+                        captured.setdefault("payload", payload),
+                        {"id": 456},
+                    )[-1],
+                )
+            raise AssertionError(f"Unexpected model: {model_cls}")
 
     monkeypatch.setattr(
         "doover_cli.apps.device_type.get_state",
         lambda: (FakeControlClient(), renderer),
-    )
-    monkeypatch.setattr(
-        "doover_cli.utils.crud.questionary.text",
-        lambda *args, **kwargs: FakeQuestion(next(text_answers)),
-    )
-
-    def fake_select(*args, **kwargs):
-        captured["select_kwargs"] = kwargs
-        return FakeQuestion(9)
-
-    monkeypatch.setattr(
-        "doover_cli.apps.device_type.questionary.select",
-        fake_select,
     )
 
     result = runner.invoke(app, ["device-type", "create"])
@@ -262,9 +259,18 @@ def test_device_type_create_prompts_for_missing_required_fields(monkeypatch, tmp
         "page": 1,
         "per_page": 100,
     }
-    assert captured["select_kwargs"]["use_search_filter"] is True
-    assert captured["select_kwargs"]["use_jk_keys"] is False
-    assert isinstance(captured["payload"], DeviceType)
+    prompted_fields = renderer.prompt_fields_calls[0]
+    solution_field = next(field for field in prompted_fields if field.key == "solution")
+    assert solution_field.kind == "resource"
+    assert solution_field.resource_lookup_choices == [
+        {
+            "id": 9,
+            "label": "Field Ops (9)",
+            "search_values": ("Field Ops (9)", "9", "Field Ops"),
+            "display_name": "Field Ops",
+            "name": None,
+        }
+    ]
     assert captured["payload"].to_version(
         "DeviceTypeSerializerDetailRequest",
         method="POST",
@@ -302,6 +308,57 @@ def test_device_type_get_renders_response(monkeypatch):
     assert renderer.render_calls == [{"id": 55, "name": "Tracker"}]
 
 
+def test_device_type_get_accepts_name_lookup(monkeypatch):
+    captured = {}
+    renderer = FakeRenderer()
+
+    class FakeControlClient:
+        def get_control_methods(self, model_cls):
+            assert model_cls is DeviceType
+            return _resource_methods(
+                list=lambda **kwargs: (
+                    captured.setdefault("list_kwargs", kwargs),
+                    SimpleNamespace(
+                        results=[
+                            SimpleNamespace(id=160631245057827589, name="a test thing that needs to be tested"),
+                        ],
+                        count=1,
+                        next=None,
+                    ),
+                )[-1]
+            )
+
+        class devices:
+            @staticmethod
+            def types_retrieve(device_type_id):
+                captured["device_type_id"] = device_type_id
+                return {"id": 160631245057827589}
+
+    monkeypatch.setattr(
+        "doover_cli.apps.device_type.get_state",
+        lambda: (FakeControlClient(), renderer),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "device-type",
+            "get",
+            "a test thing that needs to be tested (160631245057827589)",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["list_kwargs"] == {
+        "archived": False,
+        "ordering": "name",
+        "page": 1,
+        "per_page": 100,
+    }
+    assert captured["device_type_id"] == "160631245057827589"
+    assert renderer.render_calls == [{"id": 160631245057827589}]
+
+
 def test_device_type_create_help_lists_generated_options():
     result = runner.invoke(app, ["device-type", "create", "--help"])
 
@@ -316,20 +373,22 @@ def test_device_type_update_with_options_patches_payload(monkeypatch):
     captured = {}
     renderer = FakeRenderer()
 
-    class FakeDevicesClient:
-        def types_retrieve(self, _device_type_id):
-            raise AssertionError("interactive fetch should not be used")
-
-        def types_partial(self, device_type_id, payload):
-            captured["device_type_id"] = device_type_id
-            captured["payload"] = payload
-            return {"id": 55}
-
-        def types_update(self, _device_type_id, _payload):
-            raise AssertionError("PATCH should be used when available")
-
     class FakeControlClient:
-        devices = FakeDevicesClient()
+        def get_control_methods(self, model_cls):
+            assert model_cls is DeviceType
+            return _resource_methods(
+                get=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("interactive fetch should not be used")
+                ),
+                patch=lambda device_type_id, payload: (
+                    captured.setdefault("device_type_id", device_type_id),
+                    captured.setdefault("payload", payload),
+                    {"id": 55},
+                )[-1],
+                put=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("PATCH should be used when available")
+                ),
+            )
 
     monkeypatch.setattr(
         "doover_cli.apps.device_type.get_state",
@@ -363,79 +422,56 @@ def test_device_type_update_with_options_patches_payload(monkeypatch):
 
 def test_device_type_update_without_options_fetches_and_prompts(monkeypatch):
     captured = {}
-    renderer = FakeRenderer()
-
-    class FakePage:
-        def __init__(self, results):
-            self.results = results
-            self.count = len(results)
-            self.next = None
-
-    class FakeSolutionsClient:
-        def list(self, **kwargs):
-            captured["solution_list_kwargs"] = kwargs
-            return FakePage(
-                [
-                    SimpleNamespace(id=9, display_name="Existing Solution"),
-                    SimpleNamespace(id=11, display_name="Field Ops"),
-                ]
-            )
-
-    class FakeDevicesClient:
-        def types_retrieve(self, device_type_id):
-            captured["retrieved_device_type_id"] = device_type_id
-            return SimpleNamespace(
-                name="Tracker",
-                config={"mode": "auto"},
-                config_schema={"type": "object"},
-                solution=SimpleNamespace(id=9, display_name="Existing Solution"),
-            )
-
-        def types_partial(self, device_type_id, payload):
-            captured["patched_device_type_id"] = device_type_id
-            captured["payload"] = payload
-            return {"id": 55, "name": "Updated Tracker"}
-
-        def types_update(self, _device_type_id, _payload):
-            raise AssertionError("PATCH should be used when available")
+    renderer = FakeRenderer(
+        prompt_answers={
+            "name": "Updated Tracker",
+            "solution": "Field Ops (11)",
+            "config": '{"mode":"manual"}',
+            "config_schema": {"type": "object"},
+        }
+    )
 
     class FakeControlClient:
-        devices = FakeDevicesClient()
-        solutions = FakeSolutionsClient()
-
-    class FakeQuestion:
-        def __init__(self, answer):
-            self.answer = answer
-
-        def unsafe_ask(self):
-            return self.answer
-
-    prompt_answers = {
-        "Name": "Updated Tracker",
-        "Config": '{"mode":"manual"}',
-    }
-
-    def fake_text(message, default=None, **kwargs):
-        captured.setdefault("text_prompts", []).append(
-            {"message": message, "default": default, "kwargs": kwargs}
-        )
-        return FakeQuestion(prompt_answers.get(message, default))
-
-    def fake_select(*args, **kwargs):
-        captured["select_kwargs"] = kwargs
-        return FakeQuestion(11)
+        def get_control_methods(self, model_cls):
+            if model_cls is Solution:
+                return _resource_methods(
+                    list=lambda **kwargs: (
+                        captured.setdefault("solution_list_kwargs", kwargs),
+                        SimpleNamespace(
+                            results=[
+                                SimpleNamespace(id=9, display_name="Existing Solution"),
+                                SimpleNamespace(id=11, display_name="Field Ops"),
+                            ],
+                            count=2,
+                            next=None,
+                        ),
+                    )[-1]
+                )
+            if model_cls is DeviceType:
+                return _resource_methods(
+                    get=lambda device_type_id: (
+                        captured.setdefault("retrieved_device_type_id", device_type_id),
+                        SimpleNamespace(
+                            name="Tracker",
+                            config={"mode": "auto"},
+                            config_schema={"type": "object"},
+                            solution=SimpleNamespace(id=9, display_name="Existing Solution"),
+                        ),
+                    )[-1],
+                    patch=lambda device_type_id, payload: (
+                        captured.setdefault("patched_device_type_id", device_type_id),
+                        captured.setdefault("payload", payload),
+                        {"id": 55, "name": "Updated Tracker"},
+                    )[-1],
+                    put=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                        AssertionError("PATCH should be used when available")
+                    ),
+                )
+            raise AssertionError(f"Unexpected model: {model_cls}")
 
     monkeypatch.setattr(
         "doover_cli.apps.device_type.get_state",
         lambda: (FakeControlClient(), renderer),
-    )
-    monkeypatch.setattr(
-        "doover_cli.utils.crud.questionary.text",
-        fake_text,
-    )
-    monkeypatch.setattr(
-        "doover_cli.apps.device_type.questionary.select",
-        fake_select,
     )
 
     result = runner.invoke(app, ["device-type", "update", "55"])
@@ -448,11 +484,10 @@ def test_device_type_update_without_options_fetches_and_prompts(monkeypatch):
         "page": 1,
         "per_page": 100,
     }
-    assert captured["text_prompts"][0]["message"] == "Name"
-    assert captured["text_prompts"][0]["default"] == "Tracker"
-    assert captured["text_prompts"][1]["message"] == "Config"
-    assert captured["text_prompts"][1]["default"] == '{"mode": "auto"}'
-    assert captured["select_kwargs"]["default"].value == 9
+    prompted_fields = renderer.prompt_fields_calls[0]
+    assert next(field for field in prompted_fields if field.key == "name").default == "Tracker"
+    assert next(field for field in prompted_fields if field.key == "config").default == {"mode": "auto"}
+    assert next(field for field in prompted_fields if field.key == "solution").default == 9
     assert captured["patched_device_type_id"] == "55"
     assert captured["payload"] == {
         "name": "Updated Tracker",
@@ -462,46 +497,36 @@ def test_device_type_update_without_options_fetches_and_prompts(monkeypatch):
     assert renderer.render_calls == [{"id": 55, "name": "Updated Tracker"}]
 
 
-def test_device_type_archive_prompts_with_autocomplete_when_id_missing(monkeypatch):
+def test_device_type_archive_prompts_with_renderer_when_id_missing(monkeypatch):
     captured = {}
-    renderer = FakeRenderer()
-
-    class FakePage:
-        def __init__(self, results):
-            self.results = results
-            self.count = len(results)
-            self.next = None
-
-    class FakeDevicesClient:
-        def types_list(self, **kwargs):
-            captured["list_kwargs"] = kwargs
-            return FakePage(
-                [
-                    SimpleNamespace(id=12, name="Alpha Sensor"),
-                    SimpleNamespace(id=27, name="Beta Tracker"),
-                ]
-            )
-
-        def types_archive(self, device_type_id):
-            captured["archived_id"] = device_type_id
-            return {"id": int(device_type_id), "archived": True}
+    renderer = FakeRenderer(prompt_answers={"resource_id": "Beta Tracker (27)"})
 
     class FakeControlClient:
-        devices = FakeDevicesClient()
+        def get_control_methods(self, model_cls):
+            assert model_cls is DeviceType
+            return _resource_methods(
+                list=lambda **kwargs: (
+                    captured.setdefault("list_kwargs", kwargs),
+                    SimpleNamespace(
+                        results=[
+                            SimpleNamespace(id=12, name="Alpha Sensor"),
+                            SimpleNamespace(id=27, name="Beta Tracker"),
+                        ],
+                        count=2,
+                        next=None,
+                    ),
+                )[-1]
+            )
+
+        class devices:
+            @staticmethod
+            def types_archive(device_type_id):
+                captured["archived_id"] = device_type_id
+                return {"id": int(device_type_id), "archived": True}
 
     monkeypatch.setattr(
         "doover_cli.apps.device_type.get_state",
         lambda: (FakeControlClient(), renderer),
-    )
-
-    def fake_autocomplete(*args, **kwargs):
-        captured["autocomplete_args"] = args
-        captured["autocomplete_kwargs"] = kwargs
-        return FakeQuestion("Beta Tracker (27)")
-
-    monkeypatch.setattr(
-        "doover_cli.apps.device_type.questionary.autocomplete",
-        fake_autocomplete,
     )
 
     result = runner.invoke(app, ["device-type", "archive"])
@@ -513,47 +538,41 @@ def test_device_type_archive_prompts_with_autocomplete_when_id_missing(monkeypat
         "page": 1,
         "per_page": 100,
     }
-    assert captured["autocomplete_args"] == ("Device type to archive",)
-    assert captured["autocomplete_kwargs"]["choices"] == [
-        "Alpha Sensor (12)",
-        "Beta Tracker (27)",
-    ]
-    assert captured["autocomplete_kwargs"]["match_middle"] is True
+    field = renderer.prompt_fields_calls[0][0]
+    assert field.label == "Device type to archive"
+    assert field.resource_lookup_choices[1]["label"] == "Beta Tracker (27)"
+    assert field.match_middle is True
     assert captured["archived_id"] == "27"
     assert renderer.render_calls == [{"id": 27, "archived": True}]
 
 
-def test_device_type_unarchive_prompts_with_autocomplete_when_id_missing(
-    monkeypatch,
-):
+def test_device_type_unarchive_prompts_with_renderer_when_id_missing(monkeypatch):
     captured = {}
-    renderer = FakeRenderer()
-
-    class FakePage:
-        def __init__(self, results):
-            self.results = results
-            self.count = len(results)
-            self.next = None
-
-    class FakeDevicesClient:
-        def types_list(self, **kwargs):
-            captured["list_kwargs"] = kwargs
-            return FakePage([SimpleNamespace(id=91, display_name="Archived Delta")])
-
-        def types_unarchive(self, device_type_id):
-            captured["unarchived_id"] = device_type_id
-            return {"id": int(device_type_id), "archived": False}
+    renderer = FakeRenderer(prompt_answers={"resource_id": "Archived Delta (91)"})
 
     class FakeControlClient:
-        devices = FakeDevicesClient()
+        def get_control_methods(self, model_cls):
+            assert model_cls is DeviceType
+            return _resource_methods(
+                list=lambda **kwargs: (
+                    captured.setdefault("list_kwargs", kwargs),
+                    SimpleNamespace(
+                        results=[SimpleNamespace(id=91, display_name="Archived Delta")],
+                        count=1,
+                        next=None,
+                    ),
+                )[-1]
+            )
+
+        class devices:
+            @staticmethod
+            def types_unarchive(device_type_id):
+                captured["unarchived_id"] = device_type_id
+                return {"id": int(device_type_id), "archived": False}
 
     monkeypatch.setattr(
         "doover_cli.apps.device_type.get_state",
         lambda: (FakeControlClient(), renderer),
-    )
-    monkeypatch.setattr(
-        "doover_cli.apps.device_type.questionary.autocomplete",
-        lambda *args, **kwargs: FakeQuestion("Archived Delta (91)"),
     )
 
     result = runner.invoke(app, ["device-type", "unarchive"])
@@ -573,28 +592,28 @@ def test_device_type_archive_accepts_name_lookup(monkeypatch):
     captured = {}
     renderer = FakeRenderer()
 
-    class FakePage:
-        def __init__(self, results):
-            self.results = results
-            self.count = len(results)
-            self.next = None
-
-    class FakeDevicesClient:
-        def types_list(self, **kwargs):
-            captured["list_kwargs"] = kwargs
-            return FakePage(
-                [
-                    SimpleNamespace(id=12, name="Alpha Sensor"),
-                    SimpleNamespace(id=27, name="Beta Tracker"),
-                ]
+    class FakeControlClient:
+        def get_control_methods(self, model_cls):
+            assert model_cls is DeviceType
+            return _resource_methods(
+                list=lambda **kwargs: (
+                    captured.setdefault("list_kwargs", kwargs),
+                    SimpleNamespace(
+                        results=[
+                            SimpleNamespace(id=12, name="Alpha Sensor"),
+                            SimpleNamespace(id=27, name="Beta Tracker"),
+                        ],
+                        count=2,
+                        next=None,
+                    ),
+                )[-1]
             )
 
-        def types_archive(self, device_type_id):
-            captured["archived_id"] = device_type_id
-            return {"id": int(device_type_id), "archived": True}
-
-    class FakeControlClient:
-        devices = FakeDevicesClient()
+        class devices:
+            @staticmethod
+            def types_archive(device_type_id):
+                captured["archived_id"] = device_type_id
+                return {"id": int(device_type_id), "archived": True}
 
     monkeypatch.setattr(
         "doover_cli.apps.device_type.get_state",
@@ -614,36 +633,43 @@ def test_device_type_archive_accepts_name_lookup(monkeypatch):
     assert renderer.render_calls == [{"id": 27, "archived": True}]
 
 
-def test_complete_active_device_type_lookup_returns_matching_labels(monkeypatch):
-    class FakeDevicesClient:
-        def types_list(self, **kwargs):
-            assert kwargs == {
-                "archived": False,
-                "ordering": "name",
-                "page": 1,
-                "per_page": 100,
-            }
-            return SimpleNamespace(
-                results=[
-                    SimpleNamespace(id=12, name="Alpha Sensor"),
-                    SimpleNamespace(id=27, name="Beta Tracker"),
-                ],
-                count=2,
-                next=None,
+def test_resource_autocomplete_returns_matching_labels(monkeypatch):
+    class FakeControlClient:
+        def get_control_methods(self, model_cls):
+            assert model_cls is DeviceType
+            return _resource_methods(
+                list=lambda **kwargs: (
+                    kwargs
+                    == {
+                        "archived": False,
+                        "ordering": "name",
+                        "page": 1,
+                        "per_page": 100,
+                    },
+                    SimpleNamespace(
+                        results=[
+                            SimpleNamespace(id=12, name="Alpha Sensor"),
+                            SimpleNamespace(id=27, name="Beta Tracker"),
+                        ],
+                        count=2,
+                        next=None,
+                    ),
+                )[-1]
             )
 
-    class FakeControlClient:
-        devices = FakeDevicesClient()
-
     monkeypatch.setattr(
-        "doover_cli.apps.device_type._get_device_type_completion_client",
+        "doover_cli.utils.crud._get_control_lookup_completion_client",
         lambda ctx: FakeControlClient(),
     )
 
-    items = device_type_app._complete_active_device_type_lookup(
+    items = crud.resource_autocomplete(
+        DeviceType,
+        archived=False,
+        ordering="name",
+    )(
         click.Context(click.Command("archive")),
+        [],
         "beta",
     )
 
-    assert [item.value for item in items] == ["Beta Tracker (27)"]
-    assert items[0].help == "ID 27"
+    assert items == [("Beta Tracker (27)", "ID 27")]

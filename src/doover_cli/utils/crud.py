@@ -3,13 +3,14 @@ import inspect
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, Callable
+from typing import Annotated, Any, Callable, Literal
 
-import questionary
+import click
 import typer
+from pydoover.models import control as control_models
 
 from . import parsers
-from .api import ProfileAnnotation
+from .api import ProfileAnnotation, setup_session
 
 _MISSING = object()
 
@@ -21,6 +22,25 @@ class ModelVersionFieldSpec:
     required: bool
     output_id: str | None
     option_names: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Field:
+    key: str
+    label: str
+    kind: Literal["text", "int", "bool", "json", "path", "resource"]
+    required: bool
+    default: Any = None
+    help: str | None = None
+    choices: list[Any] | None = None
+    resource_model_cls: type[Any] | None = None
+    resource_model_label: str | None = None
+    resource_lookup_choices: list[dict[str, Any]] | None = None
+    match_middle: bool = False
+    allow_blank: bool = True
+    exists: bool | None = None
+    file_okay: bool | None = None
+    dir_okay: bool | None = None
 
 
 def _parse_optional_bool(value: str | None, option_name: str) -> bool | None:
@@ -36,123 +56,6 @@ def _parse_optional_bool(value: str | None, option_name: str) -> bool | None:
     raise typer.BadParameter(
         f"{option_name} must be one of: true, false, 1, 0, yes, no."
     )
-
-
-def _stringify_prompt_default(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, (dict, list)):
-        return json.dumps(value)
-    value_id = getattr(value, "id", None)
-    if value_id is not None:
-        return str(value_id)
-    return str(value)
-
-
-def _prompt_optional_text(message: str, default: Any = None) -> str | None:
-    answer = questionary.text(
-        message,
-        default=_stringify_prompt_default(default),
-    ).unsafe_ask()
-    if answer is None:
-        raise typer.Abort()
-
-    stripped = answer.strip()
-    if not stripped:
-        return None
-    return stripped
-
-
-def _prompt_required_text(message: str, default: Any = None) -> str:
-    answer = questionary.text(
-        message,
-        default=_stringify_prompt_default(default),
-        validate=lambda value: bool(value.strip()) or "This field is required.",
-    ).unsafe_ask()
-    if answer is None:
-        raise typer.Abort()
-    return answer.strip()
-
-
-def _prompt_optional_int(message: str, default: int | None = None) -> int | None:
-    answer = questionary.text(
-        message,
-        default=_stringify_prompt_default(default),
-        validate=lambda value: (
-            True
-            if not value.strip()
-            else (
-                True
-                if value.strip().lstrip("-").isdigit()
-                else "Please enter an integer or leave this blank."
-            )
-        ),
-    ).unsafe_ask()
-    if answer is None:
-        raise typer.Abort()
-
-    stripped = answer.strip()
-    if not stripped:
-        return None
-    return int(stripped)
-
-
-def _prompt_required_int(message: str, default: int | None = None) -> int:
-    answer = questionary.text(
-        message,
-        default=_stringify_prompt_default(default),
-        validate=lambda value: (
-            True
-            if value.strip().lstrip("-").isdigit()
-            else "Please enter an integer."
-        ),
-    ).unsafe_ask()
-    if answer is None:
-        raise typer.Abort()
-    return int(answer.strip())
-
-
-def _prompt_optional_boolean(message: str, default: bool | None = None) -> bool | None:
-    answer = questionary.text(
-        message,
-        default=_stringify_prompt_default(default),
-        validate=lambda value: (
-            True
-            if not value.strip()
-            else (
-                True
-                if value.strip().lower() in {"true", "false", "1", "0", "yes", "no"}
-                else "Please enter true/false or leave this blank."
-            )
-        ),
-    ).unsafe_ask()
-    if answer is None:
-        raise typer.Abort()
-
-    stripped = answer.strip()
-    if not stripped:
-        return None
-    return _parse_optional_bool(stripped, message)
-
-
-def _prompt_required_boolean(message: str, default: bool | None = None) -> bool:
-    answer = questionary.text(
-        message,
-        default=_stringify_prompt_default(default),
-        validate=lambda value: (
-            True
-            if value.strip().lower() in {"true", "false", "1", "0", "yes", "no"}
-            else "Please enter true or false."
-        ),
-    ).unsafe_ask()
-    if answer is None:
-        raise typer.Abort()
-    parsed = _parse_optional_bool(answer, message)
-    if parsed is None:
-        raise typer.BadParameter(f"{message} is required.")
-    return parsed
 
 
 def _to_option_name(name: str) -> str:
@@ -257,70 +160,117 @@ def _coerce_cli_value(spec: ModelVersionFieldSpec, raw_value: Any) -> Any:
     return stripped
 
 
-def _prompt_value_for_spec(
+def _resolve_control_model_class(ref: str) -> type[Any]:
+    try:
+        model_cls = getattr(control_models, ref)
+    except AttributeError as exc:
+        raise RuntimeError(f"Unable to resolve control model class for {ref!r}.") from exc
+    if not isinstance(model_cls, type):
+        raise RuntimeError(f"Resolved control model {ref!r} is not a class.")
+    return model_cls
+
+
+def _resolve_field_kind(spec: ModelVersionFieldSpec) -> Literal["text", "int", "bool", "json", "path", "resource"]:
+    if spec.name == "installer":
+        return "path"
+    if spec.field.type in {"integer", "SnowflakeId"}:
+        return "int"
+    if spec.field.type == "boolean":
+        return "bool"
+    if spec.field.type == "json":
+        return "json"
+    if spec.field.type == "resource":
+        return "resource"
+    return "text"
+
+
+def _build_prompt_field_for_spec(
     client: Any,
     spec: ModelVersionFieldSpec,
     default: Any,
-    resource_prompt_resolvers: dict[str, Callable[[Any, Any], Any]],
-) -> Any:
+) -> Field:
     label = (
         "Installer file path"
         if spec.name == "installer"
         else _humanize_field_name(spec.output_id or spec.name)
     )
+    kind = _resolve_field_kind(spec)
+    resource_model_cls = None
+    resource_lookup_choices = None
+    resource_model_label = None
+    match_middle = False
 
-    if spec.field.type == "resource":
-        default_id = getattr(default, "id", default)
-        resolver = resource_prompt_resolvers.get(spec.field.ref or "")
-        if resolver is not None:
-            return resolver(client, default_id)
-        if spec.required:
-            return _prompt_required_int(label, default_id)
-        return _prompt_optional_int(label, default_id)
+    if kind == "resource" and spec.field.ref:
+        resource_model_cls = _resolve_control_model_class(spec.field.ref)
+        resource_model_label = _humanize_model_name(resource_model_cls.__name__)
+        resource_lookup_choices = _load_control_model_choices(
+            client,
+            resource_model_cls,
+            archived=False,
+            ordering="display_name",
+            label_attrs=("display_name", "name"),
+            searchable_attrs=("display_name", "name"),
+            model_label=resource_model_label,
+        )
+        match_middle = True
 
-    if spec.field.type in {"integer", "SnowflakeId"}:
-        if spec.required:
-            return _prompt_required_int(label, default)
-        return _prompt_optional_int(label, default)
+    return Field(
+        key=spec.name,
+        label=label,
+        kind=kind,
+        required=spec.required,
+        default=default,
+        resource_model_cls=resource_model_cls,
+        resource_model_label=resource_model_label,
+        resource_lookup_choices=resource_lookup_choices,
+        match_middle=match_middle,
+        allow_blank=not spec.required,
+        exists=True if spec.name == "installer" else None,
+        file_okay=True if spec.name == "installer" else None,
+        dir_okay=False if spec.name == "installer" else None,
+    )
 
-    if spec.field.type == "boolean":
-        if spec.required:
-            return _prompt_required_boolean(label, default)
-        return _prompt_optional_boolean(label, default)
 
-    if spec.field.type == "json":
-        if spec.required:
-            return parsers.maybe_json(_prompt_required_text(label, default))
-        raw_value = _prompt_optional_text(label, default)
-        if raw_value is None:
-            return None
-        return parsers.maybe_json(raw_value)
-
-    if spec.name == "installer":
-        installer_input = _prompt_optional_text(label, default)
-        return Path(installer_input) if installer_input is not None else None
-
-    if spec.required:
-        return _prompt_required_text(label, default)
-    return _prompt_optional_text(label, default)
+def _normalize_prompted_value(
+    spec: ModelVersionFieldSpec,
+    field: Field,
+    raw_value: Any,
+) -> Any:
+    if raw_value is None:
+        return None
+    if field.kind == "resource" and field.resource_lookup_choices is not None:
+        return _resolve_resource_lookup_from_choices(
+            field.resource_lookup_choices,
+            raw_value,
+            model_label=field.resource_model_label or "resource",
+        )
+    return _coerce_cli_value(spec, raw_value)
 
 
 def _prompt_model_values(
     client: Any,
+    renderer: Any,
     model_cls: type[Any],
     method: str,
     initial_values: dict[str, Any],
-    resource_prompt_resolvers: dict[str, Callable[[Any, Any], Any]],
 ) -> dict[str, Any]:
     _, specs = _get_model_version_field_specs(model_cls, method)
     prompted_values = dict(initial_values)
-
-    for spec in specs:
-        prompted_values[spec.name] = _prompt_value_for_spec(
+    prompt_fields = [
+        _build_prompt_field_for_spec(
             client,
             spec,
             prompted_values.get(spec.name),
-            resource_prompt_resolvers,
+        )
+        for spec in specs
+    ]
+    prompted_answers = renderer.prompt_fields(prompt_fields)
+
+    for spec, field in zip(specs, prompt_fields):
+        prompted_values[spec.name] = _normalize_prompted_value(
+            spec,
+            field,
+            prompted_answers.get(spec.name),
         )
 
     return prompted_values
@@ -460,37 +410,298 @@ def _get_update_option_help_for_spec(spec: ModelVersionFieldSpec) -> str:
     return f"{label}. Leave unset; with no flags, the CLI will prompt you."
 
 
+def _load_control_model_choices(
+    client: Any,
+    model_cls: type[Any],
+    *,
+    archived: bool | None = None,
+    ordering: str | None = "name",
+    per_page: int = 100,
+    label_attrs: tuple[str, ...] = ("display_name", "name"),
+    searchable_attrs: tuple[str, ...] | None = None,
+    id_attr: str = "id",
+    model_label: str | None = None,
+    list_kwargs: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    page_num = 1
+    choices: list[dict[str, Any]] = []
+    methods = client.get_control_methods(model_cls)
+    search_fields = tuple(dict.fromkeys(searchable_attrs or label_attrs))
+    base_list_kwargs = dict(list_kwargs or {})
+
+    while True:
+        page_kwargs = {
+            **base_list_kwargs,
+            "page": page_num,
+            "per_page": per_page,
+        }
+        if archived is not None:
+            page_kwargs["archived"] = archived
+        if ordering is not None:
+            page_kwargs["ordering"] = ordering
+
+        page = methods.list(**page_kwargs)
+
+        for resource in page.results:
+            resource_id = int(getattr(resource, id_attr))
+            field_values = {
+                field_name: getattr(resource, field_name, None)
+                for field_name in search_fields
+            }
+            label_text = next(
+                (field_values[field_name] for field_name in label_attrs if field_values.get(field_name)),
+                None,
+            )
+            if label_text is None:
+                label_prefix = model_label or _humanize_model_name(model_cls.__name__)
+                label_text = f"{label_prefix.capitalize()} {resource_id}"
+
+            search_values = [f"{label_text} ({resource_id})", str(resource_id)]
+            search_values.extend(
+                value
+                for value in field_values.values()
+                if isinstance(value, str) and value
+            )
+            choice = {
+                "id": resource_id,
+                "label": f"{label_text} ({resource_id})",
+                "search_values": tuple(dict.fromkeys(search_values)),
+            }
+            choice.update(field_values)
+            choices.append(choice)
+
+        if not page.next or len(choices) >= page.count:
+            break
+        page_num += 1
+
+    return choices
+
+
+def _get_control_lookup_completion_client(
+    ctx: click.Context | None = None,
+) -> Any:
+    profile_name = "default"
+    if ctx is not None:
+        profile_name = ctx.params.get("_profile") or ctx.params.get("profile") or profile_name
+
+    session = setup_session(profile_name)
+    return session.get_control_client()
+
+
+def _resolve_resource_lookup_from_choices(
+    choices: list[dict[str, Any]],
+    lookup: str,
+    *,
+    model_label: str,
+) -> int:
+    stripped = lookup.strip()
+    if not stripped:
+        raise typer.BadParameter(f"Please provide a {model_label} ID or name.")
+
+    if stripped.lstrip("-").isdigit():
+        return int(stripped)
+
+    exact_label_match = next(
+        (choice["id"] for choice in choices if choice["label"] == stripped),
+        None,
+    )
+    if exact_label_match is not None:
+        return exact_label_match
+
+    lowered_lookup = stripped.casefold()
+    matches = [
+        choice
+        for choice in choices
+        if any(
+            isinstance(candidate, str) and candidate.casefold() == lowered_lookup
+            for candidate in choice["search_values"]
+        )
+    ]
+
+    unique_matches = {choice["id"]: choice for choice in matches}
+    if len(unique_matches) == 1:
+        return next(iter(unique_matches.values()))["id"]
+
+    if len(unique_matches) > 1:
+        matching_labels = ", ".join(
+            sorted(choice["label"] for choice in unique_matches.values())
+        )
+        raise typer.BadParameter(
+            f"Multiple {model_label}s match '{lookup}'. Use an ID or one of: {matching_labels}."
+        )
+
+    raise typer.BadParameter(
+        f"No {model_label} found matching '{lookup}'. Use an ID or an exact {model_label} name."
+    )
+
+
+def _validate_control_lookup(
+    choices: list[dict[str, Any]],
+    value: str,
+    *,
+    model_label: str,
+) -> bool | str:
+    try:
+        _resolve_resource_lookup_from_choices(
+            choices,
+            value,
+            model_label=model_label,
+        )
+    except typer.BadParameter as exc:
+        return str(exc)
+    return True
+
+
+def resource_autocomplete(
+    model_cls: type[Any],
+    *,
+    archived: bool | None = None,
+    ordering: str | None = "name",
+    label_attrs: tuple[str, ...] = ("display_name", "name"),
+    searchable_attrs: tuple[str, ...] | None = None,
+    id_attr: str = "id",
+    list_kwargs: dict[str, Any] | None = None,
+) -> Callable[[click.Context, list[str], str], list[tuple[str, str] | str]]:
+    model_label = _humanize_model_name(model_cls.__name__)
+
+    def autocomplete(
+        ctx: click.Context,
+        _args: list[str],
+        incomplete: str,
+    ) -> list[tuple[str, str] | str]:
+        try:
+            client = _get_control_lookup_completion_client(ctx)
+            choices = _load_control_model_choices(
+                client,
+                model_cls,
+                archived=archived,
+                ordering=ordering,
+                label_attrs=label_attrs,
+                searchable_attrs=searchable_attrs,
+                id_attr=id_attr,
+                model_label=model_label,
+                list_kwargs=list_kwargs,
+            )
+        except Exception:
+            return []
+
+        lowered_incomplete = incomplete.casefold().strip()
+        completion_items: list[tuple[str, str] | str] = []
+
+        for choice in choices:
+            if lowered_incomplete and not any(
+                lowered_incomplete in value.casefold()
+                for value in choice["search_values"]
+                if isinstance(value, str)
+            ):
+                continue
+            completion_items.append((choice["label"], f"ID {choice['id']}"))
+
+        return completion_items
+
+    return autocomplete
+
+
+def prompt_resource(
+    model_cls: type[Any],
+    client: Any,
+    renderer: Any,
+    *,
+    action: str,
+    lookup: str | None = None,
+    archived: bool | None = None,
+    ordering: str | None = "name",
+    label_attrs: tuple[str, ...] = ("display_name", "name"),
+    searchable_attrs: tuple[str, ...] | None = None,
+    id_attr: str = "id",
+    list_kwargs: dict[str, Any] | None = None,
+) -> int:
+    model_label = _humanize_model_name(model_cls.__name__)
+    if lookup is None:
+        field = Field(
+            key="resource_id",
+            label=f"{model_label.capitalize()} to {action}",
+            kind="resource",
+            required=True,
+            resource_model_cls=model_cls,
+            resource_model_label=model_label,
+            resource_lookup_choices=_load_control_model_choices(
+                client,
+                model_cls,
+                archived=archived,
+                ordering=ordering,
+                label_attrs=label_attrs,
+                searchable_attrs=searchable_attrs,
+                id_attr=id_attr,
+                model_label=model_label,
+                list_kwargs=list_kwargs,
+            ),
+            match_middle=True,
+        )
+        prompted = renderer.prompt_fields([field])
+        return _normalize_prompted_value(
+            ModelVersionFieldSpec(
+                name="resource_id",
+                field=type("FieldDef", (), {"type": "resource"})(),
+                required=True,
+                output_id="id",
+                option_names=("--id",),
+            ),
+            field,
+            prompted.get("resource_id"),
+        )
+
+    stripped_lookup = lookup.strip()
+    if stripped_lookup.lstrip("-").isdigit():
+        return int(stripped_lookup)
+
+    choices = _load_control_model_choices(
+        client,
+        model_cls,
+        archived=archived,
+        ordering=ordering,
+        label_attrs=label_attrs,
+        searchable_attrs=searchable_attrs,
+        id_attr=id_attr,
+        model_label=model_label,
+        list_kwargs=list_kwargs,
+    )
+    return _resolve_resource_lookup_from_choices(
+        choices,
+        lookup,
+        model_label=model_label,
+    )
+
+
 def build_create_command_callback(
     *,
     model_cls: type[Any],
     command_help: str,
     get_state: Callable[[], tuple[Any, Any]],
-    submit_callback: Callable[[Any, Any], Any],
-    resource_prompt_resolvers: dict[str, Callable[[Any, Any], Any]] | None = None,
 ):
     _, specs = _get_model_version_field_specs(model_cls, "POST")
-    use_resource_prompt_resolvers = resource_prompt_resolvers or {}
 
     def callback(**kwargs: Any):
         _ = kwargs.pop("_profile", None)
         kwargs.pop("ctx", None)
 
         client, renderer = get_state()
+        methods = client.get_control_methods(model_cls)
         values = _normalize_model_values(model_cls, "POST", kwargs)
 
         if any(spec.required and values.get(spec.name) is None for spec in specs):
             values = _prompt_model_values(
                 client,
+                renderer,
                 model_cls,
                 "POST",
                 values,
-                use_resource_prompt_resolvers,
             )
 
         model_instance = _build_model_instance(model_cls, "POST", values)
 
         with renderer.loading(f"Creating {_humanize_model_name(model_cls.__name__)}..."):
-            response = submit_callback(client, model_instance)
+            response = methods.post(model_instance)
 
         renderer.render(response)
 
@@ -547,16 +758,12 @@ def build_update_command_callback(
     model_cls: type[Any],
     command_help: str,
     get_state: Callable[[], tuple[Any, Any]],
-    retrieve_callback: Callable[[Any, Any], Any],
-    submit_callback: Callable[[Any, Any, dict[str, Any], str], Any],
     resource_id_param_name: str,
     resource_id_type: type[Any],
     resource_id_help: str,
-    resource_prompt_resolvers: dict[str, Callable[[Any, Any], Any]] | None = None,
 ):
     update_method = _resolve_update_method(model_cls)
     _, specs = _get_model_version_field_specs(model_cls, update_method)
-    use_resource_prompt_resolvers = resource_prompt_resolvers or {}
 
     def callback(**kwargs: Any):
         _ = kwargs.pop("_profile", None)
@@ -564,6 +771,7 @@ def build_update_command_callback(
         resource_id = kwargs.pop(resource_id_param_name)
 
         client, renderer = get_state()
+        methods = client.get_control_methods(model_cls)
         provided_values = {
             spec.name: kwargs.get(spec.name)
             for spec in specs
@@ -581,7 +789,7 @@ def build_update_command_callback(
             with renderer.loading(
                 f"Loading current {_humanize_model_name(model_cls.__name__)}..."
             ):
-                current_resource = retrieve_callback(client, resource_id)
+                current_resource = methods.get(str(resource_id))
 
             current_values = _extract_model_values(
                 model_cls,
@@ -602,10 +810,10 @@ def build_update_command_callback(
         else:
             prompted_values = _prompt_model_values(
                 client,
+                renderer,
                 model_cls,
                 update_method,
                 current_values,
-                use_resource_prompt_resolvers,
             )
             changed_values = _collect_changed_model_values(
                 model_cls,
@@ -624,7 +832,11 @@ def build_update_command_callback(
 
         payload = _build_request_payload(model_cls, update_method, values_to_submit)
         with renderer.loading(f"Updating {_humanize_model_name(model_cls.__name__)}..."):
-            response = submit_callback(client, resource_id, payload, update_method)
+            response = (
+                methods.patch(str(resource_id), payload)
+                if update_method == "PATCH"
+                else methods.put(str(resource_id), payload)
+            )
 
         renderer.render(response)
 
@@ -688,4 +900,13 @@ def build_update_command_callback(
     return callback
 
 
-__all__ = ["build_create_command_callback", "build_update_command_callback"]
+__all__ = [
+    "Field",
+    "build_create_command_callback",
+    "build_update_command_callback",
+    "_load_control_model_choices",
+    "_parse_optional_bool",
+    "_resolve_resource_lookup_from_choices",
+    "prompt_resource",
+    "resource_autocomplete",
+]

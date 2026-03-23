@@ -1,5 +1,8 @@
 from pydoover.models.control import ControlModel, ControlPage
-from typing import Any, ContextManager
+from typing import TYPE_CHECKING, Any, ContextManager
+
+if TYPE_CHECKING:
+    from ..utils.crud import Field
 
 
 class EmptyEnterable:
@@ -14,6 +17,9 @@ class RendererBase:
     def loading(self, message: str) -> ContextManager[Any]:
       raise NotImplementedError()
     
+    def prompt_fields(self, fields: list["Field"]) -> dict[str, Any]:
+      raise NotImplementedError()
+
     def render_list(self, data: list[Any] | ControlPage[Any]) -> None:
       raise NotImplementedError()
     
