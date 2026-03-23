@@ -633,6 +633,116 @@ def test_device_type_archive_accepts_name_lookup(monkeypatch):
     assert renderer.render_calls == [{"id": 27, "archived": True}]
 
 
+def test_upload_installer_prompts_for_device_type_and_file(monkeypatch, tmp_path):
+    installer = tmp_path / "installer.sh"
+    installer.write_text("#!/bin/sh\necho ok\n")
+    renderer = FakeRenderer(
+        prompt_answers={
+            "resource_id": "Tracker (42)",
+            "path": str(installer),
+        }
+    )
+    captured = {}
+
+    class FakeDevicesClient:
+        def types_list(self, **kwargs):
+            captured["types_list_kwargs"] = kwargs
+            return SimpleNamespace(
+                results=[SimpleNamespace(id=42, name="Tracker")],
+                count=1,
+                next=None,
+            )
+
+        def types_partial(self, device_type_id, body):
+            captured["types_partial"] = {
+                "id": device_type_id,
+                "body": body,
+            }
+            return {"id": int(device_type_id), "installer": "uploaded"}
+
+    class FakeControlClient:
+        devices = FakeDevicesClient()
+
+        def get_control_methods(self, model_cls):
+            assert model_cls is DeviceType
+            return _resource_methods(list=self.devices.types_list)
+
+    monkeypatch.setattr(
+        "doover_cli.apps.device_type.get_state",
+        lambda: (FakeControlClient(), renderer),
+    )
+
+    result = runner.invoke(app, ["device-type", "upload-installer"])
+
+    assert result.exit_code == 0
+    assert captured["types_list_kwargs"] == {
+        "archived": False,
+        "ordering": "name",
+        "page": 1,
+        "per_page": 100,
+    }
+    assert captured["types_partial"]["id"] == "42"
+    assert captured["types_partial"]["body"]["installer"] == installer.resolve()
+    assert renderer.render_calls == [{"id": 42, "installer": "uploaded"}]
+
+
+def test_upload_installer_tar_prompts_for_device_type_and_directory(monkeypatch, tmp_path):
+    installer_dir = tmp_path / "installer"
+    installer_dir.mkdir()
+    (installer_dir / "install.sh").write_text("#!/bin/sh\necho ok\n")
+    renderer = FakeRenderer(
+        prompt_answers={
+            "resource_id": "Tracker (42)",
+            "path": str(installer_dir),
+        }
+    )
+    captured = {}
+
+    class FakeDevicesClient:
+        def types_list(self, **kwargs):
+            captured["types_list_kwargs"] = kwargs
+            return SimpleNamespace(
+                results=[SimpleNamespace(id=42, name="Tracker")],
+                count=1,
+                next=None,
+            )
+
+        def types_partial(self, device_type_id, body):
+            installer_path = body["installer"]
+            captured["types_partial"] = {
+                "id": device_type_id,
+                "installer_name": installer_path.name,
+                "installer_exists": installer_path.exists(),
+            }
+            return {"id": int(device_type_id), "installer": "uploaded"}
+
+    class FakeControlClient:
+        devices = FakeDevicesClient()
+
+        def get_control_methods(self, model_cls):
+            assert model_cls is DeviceType
+            return _resource_methods(list=self.devices.types_list)
+
+    monkeypatch.setattr(
+        "doover_cli.apps.device_type.get_state",
+        lambda: (FakeControlClient(), renderer),
+    )
+
+    result = runner.invoke(app, ["device-type", "upload-installer-tar"])
+
+    assert result.exit_code == 0
+    assert captured["types_list_kwargs"] == {
+        "archived": False,
+        "ordering": "name",
+        "page": 1,
+        "per_page": 100,
+    }
+    assert captured["types_partial"]["id"] == "42"
+    assert captured["types_partial"]["installer_name"].endswith(".tar.gz")
+    assert captured["types_partial"]["installer_exists"] is True
+    assert renderer.render_calls == [{"id": 42, "installer": "uploaded"}]
+
+
 def test_resource_autocomplete_returns_matching_labels(monkeypatch):
     class FakeControlClient:
         def get_control_methods(self, model_cls):

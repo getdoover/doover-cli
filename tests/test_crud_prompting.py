@@ -1,5 +1,7 @@
+from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from pydoover.models.control import Solution
 from pydoover.models.control._base import ControlField, ControlModel
 
@@ -10,6 +12,7 @@ from doover_cli.utils.crud.prompting import (
     humanize_field_name,
     humanize_model_name,
     normalize_prompted_value,
+    prompt_path,
     prompt_model_values,
     resolve_field_kind,
 )
@@ -146,3 +149,37 @@ def test_prompt_model_values_uses_defaults_and_normalizes_answers():
     assert prompted["config"] == {"mode": "auto"}
     assert prompted["count"] == 5
     assert renderer.calls[0][0].label == "Name"
+
+
+def test_prompt_path_prompts_and_validates_existing_file(tmp_path):
+    installer = tmp_path / "installer.sh"
+    installer.write_text("#!/bin/sh\necho ok\n")
+    renderer = FakeRenderer({"path": str(installer)})
+
+    prompted = prompt_path(
+        renderer,
+        label="Installer file path",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        param_hint="installer_fp",
+    )
+
+    assert prompted == installer.resolve()
+    assert renderer.calls[0][0].kind == "path"
+
+
+def test_prompt_path_rejects_wrong_path_type(tmp_path):
+    renderer = FakeRenderer({"path": str(tmp_path)})
+
+    with pytest.raises(Exception) as exc_info:
+        prompt_path(
+            renderer,
+            label="Installer file path",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            param_hint="installer_fp",
+        )
+
+    assert "must be a file" in str(exc_info.value)

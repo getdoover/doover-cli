@@ -1,5 +1,7 @@
+import tarfile
 import time
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import TYPE_CHECKING, Annotated
 
 import typer
@@ -9,10 +11,11 @@ from ..utils.crud import (
     build_create_command,
     build_update_command,
     parse_optional_bool,
+    prompt_path,
     prompt_resource,
     resource_autocomplete,
 )
-from ..utils.api import ProfileAnnotation, exit_for_unsupported_control_command
+from ..utils.api import ProfileAnnotation
 from ..utils.state import state
 
 if TYPE_CHECKING:
@@ -26,6 +29,18 @@ app = typer.Typer(no_args_is_help=True)
 def get_state() -> tuple["ControlClient", "RendererBase"]:
     session = state.session
     return session.get_control_client(), state.renderer
+
+
+def _upload_device_type_installer(
+    *,
+    device_type_id: int,
+    installer_fp: Path,
+) -> DeviceType:
+    client, _ = get_state()
+    return client.devices.types_partial(
+        str(device_type_id),
+        body={"installer": installer_fp},
+    )
 
 
 @app.command(name="list")
@@ -248,27 +263,102 @@ def unarchive(
 
 @app.command()
 def upload_installer_tar(
-    ctx: typer.Context,
-    device_type_id: Annotated[int, typer.Argument(help="Device type ID to upload to")],
+    device_type_id: Annotated[
+        str | None,
+        typer.Argument(
+            help="Device type ID or exact name.",
+            autocompletion=resource_autocomplete(
+                DeviceType,
+                archived=False,
+                ordering="name",
+            ),
+        ),
+    ] = None,
     installer_fp: Annotated[
-        Path, typer.Argument(help="Path to the installer directory.")
-    ] = Path(),
+        Path | None, typer.Argument(help="Path to the installer directory.")
+    ] = None,
     _profile: ProfileAnnotation = None,
 ):
     """Compress and upload an installer to the Doover 2.0 Control Plane API."""
-    _ = (ctx, device_type_id, installer_fp, _profile)
-    exit_for_unsupported_control_command("device-type.upload-installer-tar")
+    _ = _profile
+    client, renderer = get_state()
+    resolved_id = prompt_resource(
+        DeviceType,
+        client,
+        renderer,
+        action="update",
+        lookup=device_type_id,
+        archived=False,
+        ordering="name",
+    )
+    installer_dir = prompt_path(
+        renderer,
+        label="Installer directory path",
+        value=installer_fp,
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        param_hint="installer_fp",
+    )
+
+    with NamedTemporaryFile(suffix=".tar.gz") as temp_tar:
+        temp_tar_path = Path(temp_tar.name)
+        with tarfile.open(temp_tar_path, mode="w:gz") as archive:
+            archive.add(installer_dir, arcname=installer_dir.name)
+
+        with renderer.loading("Uploading installer tarball..."):
+            response = _upload_device_type_installer(
+                device_type_id=resolved_id,
+                installer_fp=temp_tar_path,
+            )
+
+    renderer.render(response)
 
 
 @app.command()
 def upload_installer(
-    ctx: typer.Context,
-    device_type_id: Annotated[int, typer.Argument(help="Device type ID to upload to")],
+    device_type_id: Annotated[
+        str | None,
+        typer.Argument(
+            help="Device type ID or exact name.",
+            autocompletion=resource_autocomplete(
+                DeviceType,
+                archived=False,
+                ordering="name",
+            ),
+        ),
+    ] = None,
     installer_fp: Annotated[
-        Path, typer.Argument(help="Path to the installer script.")
-    ] = Path(),
+        Path | None, typer.Argument(help="Path to the installer script.")
+    ] = None,
     _profile: ProfileAnnotation = None,
 ):
     """Upload an installer to the Doover 2.0 Control Plane API."""
-    _ = (ctx, device_type_id, installer_fp, _profile)
-    exit_for_unsupported_control_command("device-type.upload-installer")
+    _ = _profile
+    client, renderer = get_state()
+    resolved_id = prompt_resource(
+        DeviceType,
+        client,
+        renderer,
+        action="update",
+        lookup=device_type_id,
+        archived=False,
+        ordering="name",
+    )
+    installer_path = prompt_path(
+        renderer,
+        label="Installer file path",
+        value=installer_fp,
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        param_hint="installer_fp",
+    )
+
+    with renderer.loading("Uploading installer..."):
+        response = client.devices.types_partial(
+            str(resolved_id),
+            body={"installer": installer_path},
+        )
+
+    renderer.render(response)

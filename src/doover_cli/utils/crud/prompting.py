@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
+
+import typer
 
 from .lookup import (
     LookupChoice,
@@ -145,3 +148,67 @@ def prompt_model_values(
         )
 
     return prompted_values
+
+
+def prompt_path(
+    renderer: Any,
+    *,
+    label: str,
+    value: str | Path | None = None,
+    required: bool = True,
+    exists: bool | None = None,
+    file_okay: bool | None = None,
+    dir_okay: bool | None = None,
+    param_hint: str = "path",
+) -> Path:
+    if value is None:
+        field = Field(
+            key="path",
+            label=label,
+            kind="path",
+            required=required,
+            exists=exists,
+            file_okay=file_okay,
+            dir_okay=dir_okay,
+            allow_blank=not required,
+        )
+        prompted = renderer.prompt_fields([field])
+        value = prompted.get("path")
+
+    if value is None:
+        raise typer.BadParameter(f"{label} is required.", param_hint=param_hint)
+
+    path = Path(value).expanduser().resolve()
+
+    if exists is True and not path.exists():
+        raise typer.BadParameter(
+            f"{label} does not exist: {path}",
+            param_hint=param_hint,
+        )
+    if exists is False and path.exists():
+        raise typer.BadParameter(
+            f"{label} already exists: {path}",
+            param_hint=param_hint,
+        )
+    if file_okay is True and path.exists() and not path.is_file():
+        raise typer.BadParameter(
+            f"{label} must be a file: {path}",
+            param_hint=param_hint,
+        )
+    if dir_okay is True and path.exists() and not path.is_dir():
+        raise typer.BadParameter(
+            f"{label} must be a directory: {path}",
+            param_hint=param_hint,
+        )
+    if file_okay is False and path.exists() and path.is_file():
+        raise typer.BadParameter(
+            f"{label} cannot be a file: {path}",
+            param_hint=param_hint,
+        )
+    if dir_okay is False and path.exists() and path.is_dir():
+        raise typer.BadParameter(
+            f"{label} cannot be a directory: {path}",
+            param_hint=param_hint,
+        )
+
+    return path
