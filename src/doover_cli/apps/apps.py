@@ -95,7 +95,7 @@ def create(
     container_registry: Annotated[
         ContainerRegistry,
         typer.Option(prompt="What is the container registry for your app?"),
-    ] = ContainerRegistry.GITHUB_INT.value,
+    ] = ContainerRegistry.GITHUB_INT,
     owner_org_key: Annotated[
         str,
         typer.Option(
@@ -128,22 +128,23 @@ def create(
     name_as_pascal_case = "".join(word.capitalize() for word in name_as_path.split("-"))
     name_as_snake_case = "_".join(name_as_path.split("-"))
 
+    registry_name: str
     if container_registry is ContainerRegistry.GITHUB_OTHER:
         resp = questionary.text(
             "You selected an 'other' GitHub Packages registry. "
             "Please enter your GitHub organisation name, or GitHub username:"
         ).unsafe_ask()
-        container_registry = f"ghcr.io/{resp}"
+        registry_name = f"ghcr.io/{resp}"
     elif container_registry is ContainerRegistry.DOCKERHUB_OTHER:
-        container_registry = questionary.text(
+        registry_name = questionary.text(
             "You selected an 'other' DockerHub repository. "
             "Please enter the repository name (e.g spaneng):"
         ).unsafe_ask()
     elif container_registry is ContainerRegistry.DOCKERHUB_INT:
-        container_registry = "spaneng"
+        registry_name = "spaneng"
     else:
-        container_registry = container_registry.value
-    container_registry = container_registry.strip()
+        registry_name = container_registry.value
+    registry_name = registry_name.strip()
 
     print("Fetching template repository...")
     data = requests.get(TEMPLATE_REPO)
@@ -202,7 +203,7 @@ def create(
             "description": description,
             "type": "DEV",
             # git repos default to "main" rather than "latest" (dockerhub).
-            "image_name": f"{container_registry}/{name_as_path}:{'main' if container_registry.startswith('ghcr') else 'latest'}",
+            "image_name": f"{registry_name}/{name_as_path}:{'main' if registry_name.startswith('ghcr') else 'latest'}",
             "owner_org_key": owner_org_key or "FIX-ME",
             "organisation_id": owner_org_key or "FIX-ME",
             "container_registry_profile_key": container_profile_key or "FIX-ME",
@@ -241,7 +242,7 @@ def create(
 def run(
     ctx: typer.Context,
     remote: Annotated[
-        str,
+        str | None,
         typer.Argument(
             help="Remote host to run the application on. If not specified, runs locally.",
         ),
@@ -332,7 +333,7 @@ def publish(
         ),
     ] = False,
     staging: Annotated[
-        bool,
+        bool | None,
         typer.Option(
             help="Whether to force staging mode. This defaults to working it out based on the API URL."
         ),

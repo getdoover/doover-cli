@@ -6,9 +6,9 @@ import typer
 from pydoover.models.control import DeviceType
 
 from ..utils.crud import (
-    _parse_optional_bool,
-    build_create_command_callback,
-    build_update_command_callback,
+    build_create_command,
+    build_update_command,
+    parse_optional_bool,
     prompt_resource,
     resource_autocomplete,
 )
@@ -102,7 +102,7 @@ def list_(
     with renderer.loading("Loading device types..."):
         time.sleep(0.05)
         list_response = client.devices.types_list(
-            archived=_parse_optional_bool(archived, "--archived"),
+            archived=parse_optional_bool(archived, "--archived"),
             id=id,
             name=name,
             name__contains=name_contains,
@@ -157,7 +157,7 @@ def get(
     renderer.render(response)
 
 
-create = build_create_command_callback(
+create = build_create_command(
     model_cls=DeviceType,
     command_help="Create a device type.",
     get_state=lambda: get_state(),
@@ -165,7 +165,7 @@ create = build_create_command_callback(
 app.command()(create)
 
 
-update = build_update_command_callback(
+update = build_update_command(
     model_cls=DeviceType,
     command_help="Update a device type.",
     get_state=lambda: get_state(),

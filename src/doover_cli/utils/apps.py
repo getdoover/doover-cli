@@ -9,7 +9,7 @@ import questionary
 from .shell_commands import run
 
 
-def get_app_directory(root: Path = None) -> Path:
+def get_app_directory(root: Path | None = None) -> Path:
     root_fp = root or Path()
     while not (root_fp / "doover_config.json").exists():
         if root_fp == Path("/"):
@@ -44,7 +44,12 @@ def get_uv_path() -> Path:
     return uv_path
 
 
-def call_with_uv(*args, uv_run: bool = True, in_shell: bool = False, cwd: Path = None):
+def call_with_uv(
+    *args,
+    uv_run: bool = True,
+    in_shell: bool = False,
+    cwd: Path | None = None,
+):
     uv_path = get_uv_path()
     if uv_run:
         args = ["uv", "run"] + list(args)

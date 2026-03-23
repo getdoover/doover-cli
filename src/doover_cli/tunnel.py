@@ -14,7 +14,7 @@ def get(_profile: ProfileAnnotation = None, _agent: AgentAnnotation = None):
 
 @app.command()
 def activate(
-    tunnel_id: str = None,
+    tunnel_id: str | None = None,
     _profile: ProfileAnnotation = None,
     _agent: AgentAnnotation = None,
 ):
@@ -25,7 +25,7 @@ def activate(
 
 @app.command()
 def deactivate(
-    tunnel_id: str = None,
+    tunnel_id: str | None = None,
     _profile: ProfileAnnotation = None,
     _agent: AgentAnnotation = None,
 ):

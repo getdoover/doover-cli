@@ -7,7 +7,7 @@ from pydoover.models.control import ControlModel, ControlPage
 
 from ._base import RendererBase, EmptyEnterable, normalize_render_data
 from ..utils import parsers
-from ..utils.crud import _parse_optional_bool
+from ..utils.crud import parse_optional_bool
 
 if TYPE_CHECKING:
     from ..utils.crud import Field
@@ -26,7 +26,7 @@ class BasicRenderer(RendererBase):
             if field.kind == "resource" and field.resource_lookup_choices:
                 print(f"{field.label} choices:")
                 for choice in field.resource_lookup_choices:
-                    print(f"- {choice['label']}")
+                    print(f"- {choice.label}")
 
             values[field.key] = self._prompt_field(field)
         return values
@@ -50,7 +50,7 @@ class BasicRenderer(RendererBase):
             stripped = answer.strip()
             if not stripped:
                 return None
-            return _parse_optional_bool(stripped, field.label)
+            return parse_optional_bool(stripped, field.label)
 
         answer = typer.prompt(field.label, default=default, show_default=bool(default))
         return self._coerce_field_value(field, answer)

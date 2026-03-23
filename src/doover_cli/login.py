@@ -38,7 +38,8 @@ def login(
         raise typer.Exit(1) from exc
 
     auth.persist_profile(profile_name, state.config_manager)
-    state.config_manager.current_profile = profile_name
+    if state.config_manager is not None:
+        state.config_manager.current_profile = profile_name
     state.profile_name = profile_name
     state._session = None
 

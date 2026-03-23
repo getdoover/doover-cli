@@ -4,7 +4,7 @@ from rich.console import Console
 from rich.text import Text
 
 from doover_cli.renderer._default import DefaultRenderer
-from doover_cli.utils.crud import Field
+from doover_cli.utils.crud import Field, LookupChoice
 from pydoover.models.control import DeviceType, Organisation, Solution
 from pydoover.models.control._base import ControlField, ControlModel, ControlPage
 
@@ -70,10 +70,10 @@ def test_render_list_omits_columns_that_do_not_fit_terminal_width():
 def test_render_formats_resource_values_prettily():
     console = Console(record=True, width=120)
     renderer = DefaultRenderer(console=console)
-    organisation = Organisation(id="1", name="Acme Farms")
-    solution = Solution(id="2", display_name="Soil Monitor", organisation=organisation)
+    organisation = Organisation(id=1, name="Acme Farms")
+    solution = Solution(id=2, display_name="Soil Monitor", organisation=organisation)
     device_type = DeviceType(
-        id="3",
+        id=3,
         name="Tracker",
         organisation=organisation,
         solution=solution,
@@ -90,7 +90,7 @@ def test_render_formats_resource_values_prettily():
 
 def test_render_resource_value_uses_bold_blue_text():
     renderer = DefaultRenderer(console=Console(record=True, width=120))
-    organisation = Organisation(id="1", name="Acme Farms")
+    organisation = Organisation(id=1, name="Acme Farms")
 
     rendered = renderer._render_value(organisation)
 
@@ -114,6 +114,7 @@ def test_prompt_fields_uses_text_prompt_for_json(monkeypatch):
     def fake_text(message, default=None, validate=None):
         captured["message"] = message
         captured["default"] = default
+        assert validate is not None
         assert validate('{"mode":"auto"}') is True
         return FakeQuestion('{"mode":"auto"}')
 
@@ -136,6 +137,7 @@ def test_prompt_fields_uses_autocomplete_for_resource(monkeypatch):
         captured["choices"] = choices
         captured["default"] = default
         captured["match_middle"] = match_middle
+        assert validate is not None
         assert validate("Field Ops (11)") is True
         return FakeQuestion("Field Ops (11)")
 
@@ -154,8 +156,8 @@ def test_prompt_fields_uses_autocomplete_for_resource(monkeypatch):
                 default=SimpleNamespace(id=9),
                 resource_model_label="solution",
                 resource_lookup_choices=[
-                    {"id": 9, "label": "Existing Solution (9)", "search_values": ("Existing Solution (9)", "9", "Existing Solution")},
-                    {"id": 11, "label": "Field Ops (11)", "search_values": ("Field Ops (11)", "11", "Field Ops")},
+                    LookupChoice(id=9, label="Existing Solution (9)", search_values=("Existing Solution (9)", "9", "Existing Solution")),
+                    LookupChoice(id=11, label="Field Ops (11)", search_values=("Field Ops (11)", "11", "Field Ops")),
                 ],
                 match_middle=True,
             )

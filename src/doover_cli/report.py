@@ -21,7 +21,7 @@ def compose(
         datetime, Option(help="Start of the period to report on")
     ] = datetime.now() - timedelta(days=7),
     period_to: Annotated[
-        datetime, Option(help="End of the period to report on")
+        datetime | None, Option(help="End of the period to report on")
     ] = None,
     agent_ids: Annotated[str, Option(help="Agent IDs to run the report on")] = "",
     agent_names: Annotated[
@@ -39,10 +39,8 @@ def compose(
     doover report compose --agent_ids "abcdefg,abdfgds" --agent_names "Agent 1,Agent 2"
     """
 
-    if isinstance(agent_ids, str):
-        agent_ids = agent_ids.split(",")
-    if isinstance(agent_names, str):
-        agent_names = agent_names.split(",")
+    agent_id_list = agent_ids.split(",") if agent_ids else []
+    agent_name_list = agent_names.split(",") if agent_names else []
 
     ## Attempt necessary imports
     import pytz
@@ -63,8 +61,9 @@ def compose(
 
     # Define additional parameters for instantiation.
     tmp_workspace = "/tmp/doover_report_output/"  # Adjust as needed
-    access_token = state.config_manager.current.token  # Provide valid access token
-    api_endpoint = state.config_manager.current.base_url  # Provide valid endpoint
+    session = state.session
+    access_token = session.auth.token
+    api_endpoint = session.auth.control_base_url
     report_name = "Local Report"
     test_mode = False  # Set as needed
 
@@ -85,8 +84,8 @@ def compose(
     report_instance = ReportGeneratorClass(
         tmp_workspace=tmp_workspace,
         access_token=access_token,
-        agent_ids=agent_ids,
-        agent_display_names=agent_names,
+        agent_ids=agent_id_list,
+        agent_display_names=agent_name_list,
         period_from_utc=period_from.astimezone(timezone.utc),
         period_to_utc=period_to.astimezone(timezone.utc),
         for_timezone=for_timezone,

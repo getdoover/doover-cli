@@ -1,6 +1,7 @@
 import click
 import questionary
 import typer
+from typing import cast
 
 
 class QuestionaryPrompt(click.Option):
@@ -8,45 +9,45 @@ class QuestionaryPrompt(click.Option):
 
     def prepare_choice_list(self, ctx):
         default = self.get_default(ctx) or []
-        return [questionary.Choice(n, checked=n in default) for n in self.type.choices]
+        choice_type = cast(click.Choice, self.type)
+        return [
+            questionary.Choice(name, checked=name in default)
+            for name in choice_type.choices
+        ]
 
     def prompt_for_value(self, ctx: click.Context):
+        prompt = self.prompt or ""
+        default = self.get_default(ctx)
+
         if isinstance(self.type, click.Choice):
+            choice_type = cast(click.Choice, self.type)
             if len(self.type.choices) == 1:
                 return self.type.choices[0]
             if self.multiple:
                 return questionary.checkbox(
-                    self.prompt, choices=self.prepare_choice_list(ctx)
+                    prompt, choices=self.prepare_choice_list(ctx)
                 ).unsafe_ask()
             else:
                 return questionary.select(
-                    self.prompt,
-                    choices=self.type.choices,
-                    default=self.get_default(ctx),
+                    prompt,
+                    choices=choice_type.choices,
+                    default=default,
                 ).unsafe_ask()
         if isinstance(self.type, click.types.StringParamType):
             if self.hide_input is True:
                 return questionary.password(
-                    self.prompt,
-                    default=str(
-                        self.get_default(ctx)
-                        if self.get_default(ctx) is not None
-                        else ""
-                    ),
+                    prompt,
+                    default=str(default) if default is not None else "",
                 ).unsafe_ask()
             return questionary.text(
-                self.prompt,
-                default=str(
-                    self.get_default(ctx) if self.get_default(ctx) is not None else ""
-                ),
+                prompt,
+                default=str(default) if default is not None else "",
             ).unsafe_ask()
 
         if isinstance(self.type, click.types.BoolParamType):
             return questionary.confirm(
-                self.prompt,
-                default=self.get_default(ctx)
-                if self.get_default(ctx) is not None
-                else False,
+                prompt,
+                default=bool(default) if default is not None else False,
             ).unsafe_ask()
 
         return super().prompt_for_value(ctx)
@@ -54,11 +55,11 @@ class QuestionaryPrompt(click.Option):
 
 class TextPrompt(click.Option):
     def prompt_for_value(self, ctx):
+        prompt = self.prompt or ""
+        default = self.get_default(ctx)
         return questionary.text(
-            self.prompt,
-            default=str(
-                self.get_default(ctx) if self.get_default(ctx) is not None else ""
-            ),
+            prompt,
+            default=str(default) if default is not None else "",
         ).unsafe_ask()
 
 

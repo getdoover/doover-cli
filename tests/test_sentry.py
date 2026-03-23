@@ -36,6 +36,9 @@ class FakeConfigManager:
         self.entries[entry.profile] = entry
         self.current = entry
 
+    def get(self, profile):
+        return self.entries.get(profile)
+
     def read(self):
         return None
 

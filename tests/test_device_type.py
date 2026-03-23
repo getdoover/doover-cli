@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 from doover_cli import app
 from doover_cli.apps import device_type as device_type_app
 from doover_cli.utils import crud
+from doover_cli.utils.crud import LookupChoice
 
 runner = CliRunner()
 
@@ -138,7 +139,7 @@ def test_device_type_create_builds_payload(monkeypatch, tmp_path):
         lambda: (FakeControlClient(), renderer),
     )
     monkeypatch.setattr(
-        "doover_cli.utils.crud._prompt_model_values",
+        "doover_cli.utils.crud.commands.prompt_model_values",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             AssertionError("interactive prompt should not be used")
         ),
@@ -263,13 +264,12 @@ def test_device_type_create_prompts_for_missing_required_fields(monkeypatch, tmp
     solution_field = next(field for field in prompted_fields if field.key == "solution")
     assert solution_field.kind == "resource"
     assert solution_field.resource_lookup_choices == [
-        {
-            "id": 9,
-            "label": "Field Ops (9)",
-            "search_values": ("Field Ops (9)", "9", "Field Ops"),
-            "display_name": "Field Ops",
-            "name": None,
-        }
+        LookupChoice(
+            id=9,
+            label="Field Ops (9)",
+            search_values=("Field Ops (9)", "9", "Field Ops"),
+            field_values={"display_name": "Field Ops", "name": None},
+        )
     ]
     assert captured["payload"].to_version(
         "DeviceTypeSerializerDetailRequest",
@@ -540,7 +540,7 @@ def test_device_type_archive_prompts_with_renderer_when_id_missing(monkeypatch):
     }
     field = renderer.prompt_fields_calls[0][0]
     assert field.label == "Device type to archive"
-    assert field.resource_lookup_choices[1]["label"] == "Beta Tracker (27)"
+    assert field.resource_lookup_choices[1].label == "Beta Tracker (27)"
     assert field.match_middle is True
     assert captured["archived_id"] == "27"
     assert renderer.render_calls == [{"id": 27, "archived": True}]
@@ -658,7 +658,7 @@ def test_resource_autocomplete_returns_matching_labels(monkeypatch):
             )
 
     monkeypatch.setattr(
-        "doover_cli.utils.crud._get_control_lookup_completion_client",
+        "doover_cli.utils.crud.lookup.get_control_lookup_completion_client",
         lambda ctx: FakeControlClient(),
     )
 

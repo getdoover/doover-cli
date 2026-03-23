@@ -13,7 +13,8 @@ from rich.text import Text
 
 from ._base import RendererBase, normalize_render_data
 from ..utils import parsers
-from ..utils.crud import _parse_optional_bool
+from ..utils.crud import parse_optional_bool
+from ..utils.crud.lookup import resolve_resource_lookup
 
 
 
@@ -236,12 +237,12 @@ class DefaultRenderer(RendererBase):
         default = self._stringify_default(field.default)
 
         if field.kind == "resource" and field.resource_lookup_choices:
-            choice_labels = [choice["label"] for choice in field.resource_lookup_choices]
+            choice_labels = [choice.label for choice in field.resource_lookup_choices]
             default_choice = next(
                 (
-                    choice["label"]
+                    choice.label
                     for choice in field.resource_lookup_choices
-                    if choice["id"] == getattr(field.default, "id", field.default)
+                    if choice.id == getattr(field.default, "id", field.default)
                 ),
                 default,
             )
@@ -286,7 +287,7 @@ class DefaultRenderer(RendererBase):
             return "Please enter an integer."
         if field.kind == "bool":
             try:
-                _parse_optional_bool(stripped, field.label)
+                parse_optional_bool(stripped, field.label)
             except typer.BadParameter as exc:
                 return str(exc)
         if field.kind == "json":
@@ -298,9 +299,7 @@ class DefaultRenderer(RendererBase):
 
     def _validate_resource_field(self, field, value: str) -> bool | str:
         try:
-            from ..utils.crud import _resolve_resource_lookup_from_choices
-
-            _resolve_resource_lookup_from_choices(
+            resolve_resource_lookup(
                 field.resource_lookup_choices or [],
                 value,
                 model_label=field.resource_model_label or "resource",
@@ -316,7 +315,7 @@ class DefaultRenderer(RendererBase):
         if field.kind == "int":
             return int(stripped)
         if field.kind == "bool":
-            return _parse_optional_bool(stripped, field.label)
+            return parse_optional_bool(stripped, field.label)
         if field.kind == "json":
             return parsers.maybe_json(stripped)
         if field.kind == "path":

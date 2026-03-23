@@ -12,6 +12,7 @@ class State:
         self.profile_name: str = "default"
 
         self.debug: bool = False
+        self.json: bool = False
         self.renderer_name: Renderer | None = None
         self._renderer: RendererBase | None = None
 

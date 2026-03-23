@@ -60,6 +60,7 @@ def test_login_command_writes_default_profile(monkeypatch):
     assert "Successfully logged into Doover (production)" in result.stdout
 
     manager = DooverCLIAuthClient.from_profile_name("default")._config_manager
+    assert manager is not None
     profile = manager.get("default")
     assert profile is not None
     assert profile.token == "access-token"

@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 import typer
-from pydoover.api import NotFoundError
+from pydoover.api import DataClient, NotFoundError
 from pydoover.models.data.attachment import File
 from typer import Argument, Typer
 from typing_extensions import Annotated
@@ -18,7 +18,7 @@ from .utils.state import state
 app = Typer(no_args_is_help=True)
 
 
-def _get_data_client_and_agent_id() -> tuple[object, int]:
+def _get_data_client_and_agent_id() -> tuple[DataClient, int]:
     session = state.session
     return session.get_data_client(), session.require_agent_id(state.agent_id)
 
