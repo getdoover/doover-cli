@@ -49,7 +49,7 @@ def agent_callback(value: str | None):
 
 
 ProfileAnnotation = Annotated[
-    str,
+    str | None,
     Option(
         "--profile",
         help="Config profile to use for this request.",
@@ -57,7 +57,7 @@ ProfileAnnotation = Annotated[
     ),
 ]
 AgentAnnotation = Annotated[
-    str,
+    str | None,
     Option(
         "--agent",
         help="Doover agent ID to use for this request.",
