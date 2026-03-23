@@ -43,6 +43,9 @@ class DefaultRenderer(RendererBase):
         self._render_rows(rows, caption=caption)
 
     def render(self, data: dict[str, Any] | ControlModel) -> None:
+        if isinstance(data, ControlModel):
+            self._render_detail(data)
+            return
         self._render_rows([data])
 
     def _render_rows(self, items: list[Any], *, caption: str | None = None) -> None:
@@ -143,6 +146,27 @@ class DefaultRenderer(RendererBase):
 
         return table
 
+    def _render_detail(self, item: ControlModel) -> None:
+        row = self._normalize_row(item)
+        if not row:
+            self.console.print_json(json.dumps(normalize_render_data(item), indent=4))
+            return
+
+        table = Table(
+            show_header=False,
+            show_edge=False,
+            box=None,
+            pad_edge=False,
+            padding=(0, 1),
+        )
+        table.add_column(style="bold cyan", no_wrap=True)
+        table.add_column("Value")
+
+        for key in self._collect_columns([item], [row]):
+            table.add_row(key, self._render_value(row.get(key)))
+
+        self.console.print(table)
+
     def _build_caption(
         self,
         caption: str | None,
@@ -182,20 +206,29 @@ class DefaultRenderer(RendererBase):
 
     def _render_value(self, value: Any) -> str | Text:
         if value is None:
-            return ""
+            return Text("-", style="dim")
         if isinstance(value, ControlModel):
             return self._render_resource(value)
         if isinstance(value, list):
             return self._render_list(value)
         if isinstance(value, dict):
-            return json.dumps(value, ensure_ascii=True, separators=(", ", ": "))
-        return str(value)
+            return Text(
+                json.dumps(value, ensure_ascii=True, separators=(", ", ": ")),
+                style="bright_cyan",
+            )
+        if isinstance(value, bool):
+            return Text(str(value).lower(), style="yellow")
+        if isinstance(value, (int, float)):
+            return Text(str(value), style="magenta")
+        if isinstance(value, str):
+            return Text(value, style="green")
+        return Text(str(value), style="white")
 
     def _plain_text_value(self, value: Any) -> str:
         if value is None:
             return ""
         if isinstance(value, ControlModel):
-            return self._resource_label(value) or str(getattr(value, "id", "") or "")
+            return self._resource_summary(value)
         if isinstance(value, list):
             return ", ".join(self._plain_text_value(item) for item in value)
         if isinstance(value, dict):
@@ -203,10 +236,7 @@ class DefaultRenderer(RendererBase):
         return str(value)
 
     def _render_resource(self, value: ControlModel) -> Text:
-        label = self._resource_label(value)
-        if not label:
-            label = str(getattr(value, "id", "") or (getattr(value, "_model_name", None) or type(value).__name__))
-        return Text(label, style="bold blue")
+        return Text(self._resource_summary(value), style="bold blue")
 
     def _render_list(self, value: list[Any]) -> str | Text:
         if any(isinstance(item, ControlModel) for item in value):
@@ -216,7 +246,7 @@ class DefaultRenderer(RendererBase):
                     parts.append(", ")
                 parts.append(self._render_value(item))
             return Text.assemble(*parts)
-        return ", ".join(self._plain_text_value(item) for item in value)
+        return Text(", ".join(self._plain_text_value(item) for item in value), style="bright_cyan")
 
     def _resource_label(self, value: ControlModel) -> str | None:
         for field_name in ("display_name", "name", "username", "email"):
@@ -231,6 +261,19 @@ class DefaultRenderer(RendererBase):
             return full_name
 
         return None
+
+    def _resource_summary(self, value: ControlModel) -> str:
+        resource_type = getattr(value, "_model_name", None) or type(value).__name__
+        resource_id = getattr(value, "id", None)
+        resource_label = self._resource_label(value)
+
+        parts = [str(resource_type)]
+        if resource_id not in (None, ""):
+            parts.append(f"id={resource_id}")
+        if resource_label:
+            parts.append(f"name={resource_label}")
+
+        return ", ".join(parts)
 
     def _prompt_field(self, field) -> Any:
         default = self._stringify_default(field.default)

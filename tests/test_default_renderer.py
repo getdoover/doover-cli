@@ -82,10 +82,12 @@ def test_render_formats_resource_values_prettily():
     renderer.render(device_type)
 
     output = console.export_text()
-    assert "Acme Farms" in output
-    assert "Soil Monitor" in output
-    assert "Organisation:" not in output
-    assert "Solution:" not in output
+    assert "organisation" in output
+    assert "solution" in output
+    assert "Organisation, id=1, name=Acme Farms" in output
+    assert "Solution, id=2, name=Soil Monitor" in output
+    assert "┏" not in output
+    assert "│" not in output
 
 
 def test_render_resource_value_uses_bold_blue_text():
@@ -95,8 +97,30 @@ def test_render_resource_value_uses_bold_blue_text():
     rendered = renderer._render_value(organisation)
 
     assert isinstance(rendered, Text)
-    assert rendered.plain == "Acme Farms"
+    assert rendered.plain == "Organisation, id=1, name=Acme Farms"
     assert str(rendered.style) == "bold blue"
+
+
+def test_render_value_applies_type_styles():
+    renderer = DefaultRenderer(console=Console(record=True, width=120))
+
+    rendered_string = renderer._render_value("Tracker")
+    rendered_number = renderer._render_value(42)
+    rendered_bool = renderer._render_value(True)
+    rendered_dict = renderer._render_value({"mode": "auto"})
+    rendered_list = renderer._render_value(["a", "b"])
+
+    assert isinstance(rendered_string, Text)
+    assert rendered_string.plain == "Tracker"
+    assert str(rendered_string.style) == "green"
+    assert rendered_number.plain == "42"
+    assert str(rendered_number.style) == "magenta"
+    assert rendered_bool.plain == "true"
+    assert str(rendered_bool.style) == "yellow"
+    assert rendered_dict.plain == '{"mode": "auto"}'
+    assert str(rendered_dict.style) == "bright_cyan"
+    assert rendered_list.plain == "a, b"
+    assert str(rendered_list.style) == "bright_cyan"
 
 
 class FakeQuestion:
