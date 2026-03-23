@@ -1,6 +1,6 @@
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 import click
 import questionary
@@ -215,12 +215,11 @@ def _complete_device_type_lookup(
 
 def _complete_active_device_type_lookup(
     ctx: click.Context,
-    param: click.Parameter | None,
     incomplete: str,
 ) -> list[click.shell_completion.CompletionItem]:
     return _complete_device_type_lookup(
         ctx,
-        param,
+        None,
         incomplete,
         archived=False,
     )
@@ -228,12 +227,11 @@ def _complete_active_device_type_lookup(
 
 def _complete_archived_device_type_lookup(
     ctx: click.Context,
-    param: click.Parameter | None,
     incomplete: str,
 ) -> list[click.shell_completion.CompletionItem]:
     return _complete_device_type_lookup(
         ctx,
-        param,
+        None,
         incomplete,
         archived=True,
     )
@@ -599,7 +597,7 @@ def archive(
         str | None,
         typer.Argument(
             help="Device type ID or exact name to archive.",
-            shell_complete=_complete_active_device_type_lookup,
+            autocompletion=_complete_active_device_type_lookup,
         ),
     ] = None,
     _profile: ProfileAnnotation = None,
@@ -627,7 +625,7 @@ def unarchive(
         str | None,
         typer.Argument(
             help="Device type ID or exact name to unarchive.",
-            shell_complete=_complete_archived_device_type_lookup,
+            autocompletion=_complete_archived_device_type_lookup,
         ),
     ] = None,
     _profile: ProfileAnnotation = None,

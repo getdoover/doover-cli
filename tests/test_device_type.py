@@ -129,7 +129,7 @@ def test_device_type_create_builds_payload(monkeypatch, tmp_path):
         lambda: (FakeControlClient(), renderer),
     )
     monkeypatch.setattr(
-        "doover_cli.utils.crud.create._prompt_model_values",
+        "doover_cli.utils.crud._prompt_model_values",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             AssertionError("interactive prompt should not be used")
         ),
@@ -240,7 +240,7 @@ def test_device_type_create_prompts_for_missing_required_fields(monkeypatch, tmp
         lambda: (FakeControlClient(), renderer),
     )
     monkeypatch.setattr(
-        "doover_cli.utils.crud.create.questionary.text",
+        "doover_cli.utils.crud.questionary.text",
         lambda *args, **kwargs: FakeQuestion(next(text_answers)),
     )
 
@@ -362,7 +362,6 @@ def test_device_type_update_with_options_patches_payload(monkeypatch):
 
 
 def test_device_type_update_without_options_fetches_and_prompts(monkeypatch):
-def test_device_type_archive_prompts_with_autocomplete_when_id_missing(monkeypatch):
     captured = {}
     renderer = FakeRenderer()
 
@@ -425,6 +424,54 @@ def test_device_type_archive_prompts_with_autocomplete_when_id_missing(monkeypat
     def fake_select(*args, **kwargs):
         captured["select_kwargs"] = kwargs
         return FakeQuestion(11)
+
+    monkeypatch.setattr(
+        "doover_cli.apps.device_type.get_state",
+        lambda: (FakeControlClient(), renderer),
+    )
+    monkeypatch.setattr(
+        "doover_cli.utils.crud.questionary.text",
+        fake_text,
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.device_type.questionary.select",
+        fake_select,
+    )
+
+    result = runner.invoke(app, ["device-type", "update", "55"])
+
+    assert result.exit_code == 0
+    assert captured["retrieved_device_type_id"] == "55"
+    assert captured["solution_list_kwargs"] == {
+        "archived": False,
+        "ordering": "display_name",
+        "page": 1,
+        "per_page": 100,
+    }
+    assert captured["text_prompts"][0]["message"] == "Name"
+    assert captured["text_prompts"][0]["default"] == "Tracker"
+    assert captured["text_prompts"][1]["message"] == "Config"
+    assert captured["text_prompts"][1]["default"] == '{"mode": "auto"}'
+    assert captured["select_kwargs"]["default"].value == 9
+    assert captured["patched_device_type_id"] == "55"
+    assert captured["payload"] == {
+        "name": "Updated Tracker",
+        "config": {"mode": "manual"},
+        "solution_id": 11,
+    }
+    assert renderer.render_calls == [{"id": 55, "name": "Updated Tracker"}]
+
+
+def test_device_type_archive_prompts_with_autocomplete_when_id_missing(monkeypatch):
+    captured = {}
+    renderer = FakeRenderer()
+
+    class FakePage:
+        def __init__(self, results):
+            self.results = results
+            self.count = len(results)
+            self.next = None
+
     class FakeDevicesClient:
         def types_list(self, **kwargs):
             captured["list_kwargs"] = kwargs
@@ -595,7 +642,6 @@ def test_complete_active_device_type_lookup_returns_matching_labels(monkeypatch)
 
     items = device_type_app._complete_active_device_type_lookup(
         click.Context(click.Command("archive")),
-        None,
         "beta",
     )
 
