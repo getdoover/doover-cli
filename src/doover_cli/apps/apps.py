@@ -1,3 +1,4 @@
+from typing import TYPE_CHECKING
 import copy
 import json
 import os
@@ -6,13 +7,15 @@ import re
 import shutil
 import socket
 import subprocess
-
+import time
 from urllib.parse import urlencode
 from pathlib import Path
 from enum import Enum
 
+import click
 import jsonschema.exceptions
 import rich
+from pydoover.models.control import Application
 from typing_extensions import Annotated
 
 import requests
@@ -20,10 +23,23 @@ import typer
 import questionary
 
 
-from ..utils.api import ProfileAnnotation, exit_for_unsupported_control_command
+from ..config_schema import export as export_config_command
+from ..utils.api import ProfileAnnotation
 from ..utils.apps import get_app_directory, call_with_uv, get_docker_path, get_app_config
+from ..utils.crud import (
+    build_update_command,
+    parse_optional_bool,
+    prompt_resource,
+    resource_autocomplete,
+)
 from ..utils.prompt import QuestionaryPromptCommand
 from ..utils.shell_commands import run as shell_run
+from ..utils.sentry import capture_handled_exception
+from ..utils.state import state
+
+if TYPE_CHECKING:
+    from pydoover.api import ControlClient
+    from ..renderer import RendererBase
 
 CHANNEL_VIEWER = "https://my.doover.com/channels/dda"
 TEMPLATE_REPO = "https://api.github.com/repos/getdoover/app-template/tarball/main"
@@ -52,6 +68,141 @@ class ContainerRegistry(Enum):
     GITHUB_OTHER = "ghcr.io/other"
     DOCKERHUB_INT = "DockerHub (spaneng)"
     DOCKERHUB_OTHER = "DockerHub (other)"
+
+
+def get_state() -> tuple["ControlClient", "RendererBase"]:
+    session = state.session
+    return session.get_control_client(), state.renderer
+
+
+def _control_base_url() -> str:
+    session = getattr(state, "_session", None)
+    if session is not None:
+        return getattr(session.auth, "control_base_url", "") or ""
+
+    try:
+        return getattr(state.session.auth, "control_base_url", "") or ""
+    except RuntimeError:
+        return ""
+
+
+def _resolve_staging(staging: bool | None) -> bool:
+    if staging is not None:
+        return staging
+    return ".staging." in _control_base_url()
+
+
+def _build_container(root_fp: Path, *, buildx: bool, build_args: str, image_name: str) -> None:
+    shell_run(
+        f"docker {'buildx' if buildx else ''} build {build_args} -t {image_name} {str(root_fp)}",
+    )
+
+
+def _push_container(image_name: str) -> None:
+    shell_run(f"docker push {image_name}")
+
+
+def _require_publish_value(name: str, value, *, allow_empty_list: bool = False, allow_none: bool = False):
+    if value == "FIX-ME":
+        raise typer.BadParameter(
+            f"{name} is set to FIX-ME in doover_config.json. Update it before publishing."
+        )
+    if value is None and allow_none is False:
+        raise typer.BadParameter(f"{name} is required in doover_config.json.")
+    if isinstance(value, str) and not value.strip():
+        raise typer.BadParameter(f"{name} is required in doover_config.json.")
+    if allow_empty_list is False and isinstance(value, list) and not value:
+        raise typer.BadParameter(f"{name} is required in doover_config.json.")
+    return value
+
+
+def _build_application_payload(
+    app_config,
+    *,
+    staging: bool,
+    include_deployment_data: bool,
+) -> dict:
+    payload = app_config.to_request_payload(
+        include_deployment_data=include_deployment_data,
+        is_staging=staging,
+        method="POST",
+    )
+
+    _require_publish_value("name", payload["name"])
+    _require_publish_value("display_name", payload["display_name"])
+    _require_publish_value("description", payload["description"])
+    _require_publish_value("type", payload["type"])
+    _require_publish_value("visibility", payload["visibility"])
+    _require_publish_value("organisation_id", payload["organisation_id"], allow_none=True)
+    _require_publish_value(
+        "container_registry_profile_id",
+        payload["container_registry_profile_id"],
+        allow_none=True if payload["type"] != "DEV" else False,
+    )
+    _require_publish_value("depends_on", payload["depends_on"], allow_empty_list=True)
+
+    if include_deployment_data is False:
+        payload.pop("deployment_data", None)
+
+    return {key: value for key, value in payload.items() if value is not None or key == "organisation_id" or key == "container_registry_profile_id"}
+
+
+def _get_persisted_application_id(app_config, *, staging: bool) -> int | None:
+    if staging:
+        staging_id = getattr(app_config, "staging_config", {}).get("id")
+        return int(staging_id) if staging_id is not None else None
+
+    app_id = getattr(app_config, "id", None)
+    return int(app_id) if app_id is not None else None
+
+
+def _persist_application_id(app_config, *, staging: bool, application_id: int) -> None:
+    if staging:
+        app_config.staging_config["id"] = application_id
+    else:
+        app_config.id = application_id
+
+    app_config.save_to_disk()
+
+
+def _resolve_existing_application_id(client, app_config, *, staging: bool) -> int | None:
+    app_id = _get_persisted_application_id(app_config, staging=staging)
+    if app_id is not None:
+        return app_id
+
+    page = client.applications.list(
+        name=app_config.name,
+        archived=False,
+        page=1,
+        per_page=100,
+    )
+    matches = [item for item in page.results if getattr(item, "name", None) == app_config.name]
+    if len(matches) > 1:
+        raise typer.BadParameter(
+            f"Multiple applications found matching name '{app_config.name}'. Set the application id in doover_config.json."
+        )
+    if len(matches) == 1:
+        application_id = int(matches[0].id)
+        _persist_application_id(app_config, staging=staging, application_id=application_id)
+        return application_id
+    return None
+
+
+def _publish_processor_package(
+    client,
+    app_id: int,
+    root_fp: Path,
+) -> Application | None:
+    package_fp = root_fp / "package.zip"
+    if not package_fp.exists():
+        raise FileNotFoundError(
+            f"package.zip not found at {package_fp}. Ensure ./build.sh produced it."
+        )
+
+    return client.applications.processor_source(
+        str(app_id),
+        body={"file": package_fp},
+    )
 
 
 def extract_archive(archive_path: pathlib.Path):
@@ -232,8 +383,298 @@ def create(
         shutil.rmtree(path / ".github", ignore_errors=True)
 
     rich.print(
-        "\n\nDone! You can now build your application with [blue]doover app build[/blue], run it with [blue]doover app run[/blue], or deploy it with [blue]doover app deploy[/blue].\n"
+        "\n\nDone! You can now build your application with [blue]doover app build[/blue], run it with [blue]doover app run[/blue], or deploy it with [blue]doover app publish[/blue].\n"
     )
+
+
+@app.command(name="list")
+def list_(
+    allow_many: Annotated[
+        str | None,
+        typer.Option(
+            help="Filter by allow-many status. Accepted values: true, false, 1, 0, yes, no."
+        ),
+    ] = None,
+    approx_installs: Annotated[
+        int | None, typer.Option(help="Filter by exact approximate installs value.")
+    ] = None,
+    approx_installs_gt: Annotated[
+        int | None,
+        typer.Option(
+            "--approx-installs-gt",
+            help="Filter by approximate installs greater than this value.",
+        ),
+    ] = None,
+    approx_installs_gte: Annotated[
+        int | None,
+        typer.Option(
+            "--approx-installs-gte",
+            help="Filter by approximate installs greater than or equal to this value.",
+        ),
+    ] = None,
+    approx_installs_lt: Annotated[
+        int | None,
+        typer.Option(
+            "--approx-installs-lt",
+            help="Filter by approximate installs less than this value.",
+        ),
+    ] = None,
+    approx_installs_lte: Annotated[
+        int | None,
+        typer.Option(
+            "--approx-installs-lte",
+            help="Filter by approximate installs less than or equal to this value.",
+        ),
+    ] = None,
+    archived: Annotated[
+        str | None,
+        typer.Option(
+            help="Filter by archived status. Accepted values: true, false, 1, 0, yes, no."
+        ),
+    ] = None,
+    container_registry_profile: Annotated[
+        str | None,
+        typer.Option(help="Filter by container registry profile identifier."),
+    ] = None,
+    description: Annotated[
+        str | None, typer.Option(help="Filter by exact description.")
+    ] = None,
+    description_contains: Annotated[
+        str | None,
+        typer.Option("--description-contains", help="Filter by description substring."),
+    ] = None,
+    description_icontains: Annotated[
+        str | None,
+        typer.Option(
+            "--description-icontains",
+            help="Filter by case-insensitive description substring.",
+        ),
+    ] = None,
+    display_name: Annotated[
+        str | None, typer.Option(help="Filter by exact display name.")
+    ] = None,
+    display_name_contains: Annotated[
+        str | None,
+        typer.Option(
+            "--display-name-contains",
+            help="Filter by display name substring.",
+        ),
+    ] = None,
+    display_name_icontains: Annotated[
+        str | None,
+        typer.Option(
+            "--display-name-icontains",
+            help="Filter by case-insensitive display name substring.",
+        ),
+    ] = None,
+    id: Annotated[int | None, typer.Option(help="Filter by application ID.")] = None,
+    name: Annotated[str | None, typer.Option(help="Filter by exact name.")] = None,
+    name_contains: Annotated[
+        str | None, typer.Option("--name-contains", help="Filter by name substring.")
+    ] = None,
+    name_icontains: Annotated[
+        str | None,
+        typer.Option(
+            "--name-icontains",
+            help="Filter by case-insensitive name substring.",
+        ),
+    ] = None,
+    ordering: Annotated[
+        str | None, typer.Option(help="Sort expression passed directly to the API.")
+    ] = None,
+    organisation: Annotated[
+        str | None, typer.Option(help="Filter by organisation identifier.")
+    ] = None,
+    page: Annotated[int | None, typer.Option(help="Page number to request.")] = None,
+    per_page: Annotated[
+        int | None, typer.Option("--per-page", help="Number of records per page.")
+    ] = None,
+    search: Annotated[str | None, typer.Option(help="Full-text search term.")] = None,
+    stars: Annotated[int | None, typer.Option(help="Filter by exact stars value.")] = None,
+    stars_gt: Annotated[
+        int | None,
+        typer.Option("--stars-gt", help="Filter by stars greater than this value."),
+    ] = None,
+    stars_gte: Annotated[
+        int | None,
+        typer.Option(
+            "--stars-gte",
+            help="Filter by stars greater than or equal to this value.",
+        ),
+    ] = None,
+    stars_lt: Annotated[
+        int | None,
+        typer.Option("--stars-lt", help="Filter by stars less than this value."),
+    ] = None,
+    stars_lte: Annotated[
+        int | None,
+        typer.Option(
+            "--stars-lte",
+            help="Filter by stars less than or equal to this value.",
+        ),
+    ] = None,
+    type: Annotated[str | None, typer.Option(help="Filter by application type.")] = None,
+    visibility: Annotated[
+        str | None, typer.Option(help="Filter by application visibility.")
+    ] = None,
+    _profile: ProfileAnnotation = None,
+):
+    """List applications."""
+    _ = _profile
+    client, renderer = get_state()
+
+    with renderer.loading("Loading applications..."):
+        time.sleep(0.05)
+        response = client.applications.list(
+            allow_many=parse_optional_bool(allow_many, "--allow-many"),
+            approx_installs=approx_installs,
+            approx_installs__gt=approx_installs_gt,
+            approx_installs__gte=approx_installs_gte,
+            approx_installs__lt=approx_installs_lt,
+            approx_installs__lte=approx_installs_lte,
+            archived=parse_optional_bool(archived, "--archived"),
+            container_registry_profile=container_registry_profile,
+            description=description,
+            description__contains=description_contains,
+            description__icontains=description_icontains,
+            display_name=display_name,
+            display_name__contains=display_name_contains,
+            display_name__icontains=display_name_icontains,
+            id=id,
+            name=name,
+            name__contains=name_contains,
+            name__icontains=name_icontains,
+            ordering=ordering,
+            organisation=organisation,
+            page=page,
+            per_page=per_page,
+            search=search,
+            stars=stars,
+            stars__gt=stars_gt,
+            stars__gte=stars_gte,
+            stars__lt=stars_lt,
+            stars__lte=stars_lte,
+            type=type,
+            visibility=visibility,
+        )
+
+    renderer.render_list(response)
+
+
+@app.command()
+def get(
+    application_id: Annotated[
+        str | None,
+        typer.Argument(
+            help="Application ID or exact name to retrieve.",
+            autocompletion=resource_autocomplete(
+                Application,
+                archived=False,
+                ordering="name",
+            ),
+        ),
+    ] = None,
+    _profile: ProfileAnnotation = None,
+):
+    """Get an application."""
+    _ = _profile
+    client, renderer = get_state()
+
+    resolved_id = prompt_resource(
+        Application,
+        client,
+        renderer,
+        action="get",
+        lookup=application_id,
+        archived=False,
+        ordering="name",
+    )
+
+    with renderer.loading("Loading application..."):
+        response = client.applications.retrieve(str(resolved_id))
+
+    renderer.render(response)
+
+
+update = build_update_command(
+    model_cls=Application,
+    command_help="Update an application.",
+    get_state=lambda: get_state(),
+    resource_id_param_name="application_id",
+    resource_id_type=int,
+    resource_id_help="Application ID to update.",
+)
+app.command()(update)
+
+
+@app.command()
+def archive(
+    application_id: Annotated[
+        str | None,
+        typer.Argument(
+            help="Application ID or exact name to archive.",
+            autocompletion=resource_autocomplete(
+                Application,
+                archived=False,
+                ordering="name",
+            ),
+        ),
+    ] = None,
+    _profile: ProfileAnnotation = None,
+):
+    """Archive an application."""
+    _ = _profile
+    client, renderer = get_state()
+
+    resolved_id = prompt_resource(
+        Application,
+        client,
+        renderer,
+        action="archive",
+        lookup=application_id,
+        archived=False,
+        ordering="name",
+    )
+
+    with renderer.loading("Archiving application..."):
+        response = client.applications.archive(str(resolved_id))
+
+    renderer.render(response)
+
+
+@app.command()
+def unarchive(
+    application_id: Annotated[
+        str | None,
+        typer.Argument(
+            help="Application ID or exact name to unarchive.",
+            autocompletion=resource_autocomplete(
+                Application,
+                archived=True,
+                ordering="name",
+            ),
+        ),
+    ] = None,
+    _profile: ProfileAnnotation = None,
+):
+    """Unarchive an application."""
+    _ = _profile
+    client, renderer = get_state()
+
+    resolved_id = prompt_resource(
+        Application,
+        client,
+        renderer,
+        action="unarchive",
+        lookup=application_id,
+        archived=True,
+        ordering="name",
+    )
+
+    with renderer.loading("Unarchiving application..."):
+        response = client.applications.unarchive(str(resolved_id))
+
+    renderer.render(response)
 
 
 @app.command(
@@ -356,8 +797,120 @@ def publish(
 
     This pushes a built image to the app's docker registry and updates the application on the Doover site.
     """
-    _ = (ctx, app_fp, skip_container, staging, export_config, buildx)
-    exit_for_unsupported_control_command("app.publish")
+    _ = _profile
+    root_fp = get_app_directory(app_fp)
+
+    if export_config:
+        try:
+            ctx.invoke(export_config_command, ctx, app_fp=root_fp, validate_=True)
+        except jsonschema.exceptions.SchemaError as exc:
+            summary, remainder = str(exc).split("\n", 1)
+            rich.print(
+                f"[red]Failed to export application configuration: {summary}[/red]\n{remainder}\n"
+            )
+            typer.confirm("Do you want to continue?", abort=True)
+        else:
+            rich.print("[green]Exported application configuration.[/green]")
+
+    app_config = get_app_config(root_fp)
+    resolved_staging = _resolve_staging(staging)
+    payload = _build_application_payload(
+        app_config,
+        staging=resolved_staging,
+        include_deployment_data=True,
+    )
+
+    client, renderer = get_state()
+
+    rich.print(
+        f"Updating application on doover site ({_control_base_url() or 'unknown base URL'})...\n"
+    )
+
+    try:
+        with renderer.loading("Publishing application..."):
+            # application_id = _resolve_existing_application_id(
+            #     client,
+            #     app_config,
+            #     staging=resolved_staging,
+            # )
+            application_id = _get_persisted_application_id(app_config, staging=resolved_staging)
+            if application_id is None:
+                print(json.dumps(payload, indent=4))
+                created = client.applications.create(body=dict(payload))
+                application_id = int(created.id)
+                _persist_application_id(
+                    app_config,
+                    staging=resolved_staging,
+                    application_id=application_id,
+                )
+                print(f"Created new application with id: {application_id}")
+
+            response = client.applications.partial(
+                str(application_id),
+                body=dict(payload),
+            )
+    except typer.Exit:
+        raise
+    except click.Abort:
+        raise
+    except Exception as exc:
+        print(f"Failed to update application: {exc}")
+        capture_handled_exception(
+            exc,
+            command="app.publish",
+            message=f"Failed to update application: {exc}",
+        )
+        raise typer.Exit(1) from exc
+
+    if getattr(app_config, "build_args", None) == "NO_BUILD":
+        print("App requested to not build. Skipping build step.")
+        print("Done!")
+        renderer.render(response)
+        raise typer.Exit(0)
+
+    if skip_container is True:
+        print("User requested to skip container build and push. Skipping...")
+        print("Done!")
+        renderer.render(response)
+        raise typer.Exit(0)
+
+    if app_config.type in ("PRO", "REP", "INT"):
+        print("\nBuilding package.zip for upload...")
+        shell_run("./build.sh", cwd=root_fp)
+        print("Uploading package.zip to Doover...")
+        processor_response = _publish_processor_package(
+            client,
+            application_id,
+            root_fp,
+        )
+        print("Done!")
+
+        print("Creating new lambda version release...")
+        version_response = client.applications.processor_version(
+            str(application_id),
+            body=dict(payload),
+        )
+        print("Done!")
+        renderer.render(version_response or processor_response or response)
+        raise typer.Exit(0)
+
+    print("\nApp updated. Now pushing the image to the registry...\n")
+    image_name = _require_publish_value("image_name", payload.get("image_name"))
+    typer.confirm(
+        f"Do you want to continue? I will build {image_name} and publish it to the registry.",
+        abort=True,
+    )
+    build_args = getattr(app_config, "build_args", "") or ""
+    _build_container(
+        root_fp,
+        buildx=buildx,
+        build_args=build_args,
+        image_name=image_name,
+    )
+    _push_container(image_name)
+
+    print("\n\nDone!")
+    renderer.render(response)
 
 
 @app.command(
@@ -388,8 +941,11 @@ def build(
         )
         raise typer.Exit(1)
 
-    shell_run(
-        f"docker {'buildx' if buildx else ''} build {config.build_args} {' '.join(ctx.args)} -t {config.image_name} {str(root_fp)}",
+    _build_container(
+        root_fp,
+        buildx=buildx,
+        build_args=f"{config.build_args} {' '.join(ctx.args)}".strip(),
+        image_name=config.image_name,
     )
 
 

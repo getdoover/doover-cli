@@ -4,11 +4,37 @@ import typer
 from typing import cast
 
 
+def _normalize_choice_default(default, choices):
+    if default is None:
+        return None
+
+    if isinstance(default, tuple):
+        default = list(default)
+
+    if isinstance(default, list):
+        normalized = []
+        for item in default:
+            normalized_item = _normalize_choice_default(item, choices)
+            if normalized_item is not None:
+                normalized.append(normalized_item)
+        return normalized
+
+    value = getattr(default, "value", default)
+    if value in choices:
+        return value
+
+    name = getattr(default, "name", None)
+    if name in choices:
+        return name
+
+    return value
+
+
 class QuestionaryPrompt(click.Option):
     """A custom click option that uses questionary for prompting the user."""
 
     def prepare_choice_list(self, ctx):
-        default = self.get_default(ctx) or []
+        default = _normalize_choice_default(self.get_default(ctx), self.type.choices) or []
         choice_type = cast(click.Choice, self.type)
         return [
             questionary.Choice(name, checked=name in default)
@@ -21,6 +47,7 @@ class QuestionaryPrompt(click.Option):
 
         if isinstance(self.type, click.Choice):
             choice_type = cast(click.Choice, self.type)
+            default = _normalize_choice_default(default, choice_type.choices)
             if len(self.type.choices) == 1:
                 return self.type.choices[0]
             if self.multiple:
