@@ -77,10 +77,10 @@ def load_ctx(
     state.config_manager = ConfigManager("default")
     state._session = None
     state.debug = debug
-    
+
     if render is not None and json:
         raise typer.BadParameter("Cannot use --json and --renderer together.")
-    
+
     state.renderer_name = render
 
     # return ctx.invoke(ctx.obj, *args, **kwargs)

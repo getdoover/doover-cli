@@ -13,9 +13,7 @@ if TYPE_CHECKING:
     from ..utils.crud import Field
 
 
-
 class BasicRenderer(RendererBase):
-    
     def loading(self, message: str) -> ContextManager[Any]:
         print(message)
         return EmptyEnterable()
@@ -30,10 +28,10 @@ class BasicRenderer(RendererBase):
 
             values[field.key] = self._prompt_field(field)
         return values
-    
+
     def render_list(self, data: list[Any] | ControlPage[Any]) -> None:
         print(json.dumps(normalize_render_data(data), indent=4))
-    
+
     def render(self, data: dict[str, Any] | ControlModel) -> None:
         print(json.dumps(normalize_render_data(data), indent=4))
 
@@ -46,7 +44,9 @@ class BasicRenderer(RendererBase):
                     field.label,
                     default=bool(field.default) if field.default is not None else False,
                 )
-            answer = typer.prompt(field.label, default=default, show_default=bool(default))
+            answer = typer.prompt(
+                field.label, default=default, show_default=bool(default)
+            )
             stripped = answer.strip()
             if not stripped:
                 return None

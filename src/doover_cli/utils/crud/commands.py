@@ -17,7 +17,11 @@ from .values import (
     normalize_model_values,
 )
 
+from pathlib import Path
+
+
 if TYPE_CHECKING:
+
     def _build_runtime_annotated(annotation_type: Any, option_info: Any) -> Any: ...
 else:
     # Typer inspects runtime annotations, so these Annotated wrappers need to be
@@ -36,7 +40,6 @@ def _get_option_type_for_spec(spec: ModelVersionFieldSpec) -> Any:
     return str | None
 
 
-from pathlib import Path
 
 
 def _get_option_help_for_spec(spec: ModelVersionFieldSpec, *, update: bool) -> str:
@@ -77,7 +80,9 @@ def _build_option_parameters(
 
     for spec in specs:
         option_info = _build_option_info_for_spec(spec, update=update)
-        annotation = _build_runtime_annotated(_get_option_type_for_spec(spec), option_info)
+        annotation = _build_runtime_annotated(
+            _get_option_type_for_spec(spec), option_info
+        )
         annotations[spec.name] = annotation
         parameters.append(
             inspect.Parameter(
@@ -142,7 +147,9 @@ def build_create_command(
         "return": None,
     }
 
-    option_parameters, option_annotations = _build_option_parameters(specs, update=False)
+    option_parameters, option_annotations = _build_option_parameters(
+        specs, update=False
+    )
     parameters.extend(option_parameters)
     annotations.update(option_annotations)
 

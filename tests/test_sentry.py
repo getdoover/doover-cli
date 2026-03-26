@@ -132,7 +132,9 @@ def test_main_captures_unhandled_exception_and_flushes(monkeypatch):
     capture_calls = []
     flush_calls = []
 
-    monkeypatch.setattr(doover_cli.sentry_utils, "init_sentry", lambda: init_calls.append(True))
+    monkeypatch.setattr(
+        doover_cli.sentry_utils, "init_sentry", lambda: init_calls.append(True)
+    )
     monkeypatch.setattr(
         doover_cli.sentry_utils,
         "current_command_path",

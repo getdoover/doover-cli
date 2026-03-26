@@ -104,7 +104,9 @@ class LocalApplication(ControlApplication):
 
     @staticmethod
     def _request_payload_keys() -> set[str]:
-        fields = ControlApplication._versions["ApplicationSerializerDetailRequest"]["fields"]
+        fields = ControlApplication._versions["ApplicationSerializerDetailRequest"][
+            "fields"
+        ]
         keys = set()
         for field_name, config in fields.items():
             keys.add(config.get("output_id", field_name))

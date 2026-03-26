@@ -17,7 +17,6 @@ from ..utils.crud import parse_optional_bool
 from ..utils.crud.lookup import resolve_resource_lookup
 
 
-
 class DefaultRenderer(RendererBase):
     _MAX_COLUMN_WIDTH = 30
 
@@ -116,7 +115,10 @@ class DefaultRenderer(RendererBase):
         visible: list[str] = []
         for column in columns:
             candidate = [*visible, column]
-            if not visible or self._estimate_table_width(candidate, rows) <= self.console.width:
+            if (
+                not visible
+                or self._estimate_table_width(candidate, rows) <= self.console.width
+            ):
                 visible = candidate
                 continue
             break
@@ -172,7 +174,9 @@ class DefaultRenderer(RendererBase):
         columns: list[str],
         rows: list[dict[str, Any]],
     ) -> int:
-        content_width = sum(self._estimate_column_width(column, rows) for column in columns)
+        content_width = sum(
+            self._estimate_column_width(column, rows) for column in columns
+        )
         border_and_padding_width = (3 * len(columns)) + 1
         return content_width + border_and_padding_width
 
@@ -206,7 +210,10 @@ class DefaultRenderer(RendererBase):
     def _render_resource(self, value: ControlModel) -> Text:
         label = self._resource_label(value)
         if not label:
-            label = str(getattr(value, "id", "") or (getattr(value, "_model_name", None) or type(value).__name__))
+            label = str(
+                getattr(value, "id", "")
+                or (getattr(value, "_model_name", None) or type(value).__name__)
+            )
         return Text(label, style="bold blue")
 
     def _render_list(self, value: list[Any]) -> str | Text:

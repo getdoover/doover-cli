@@ -63,13 +63,27 @@ def test_load_control_model_choices_builds_typed_choices():
 
 def test_resolve_resource_lookup_supports_ids_labels_aliases_and_errors():
     choices = [
-        LookupChoice(id=12, label="Alpha Sensor (12)", search_values=("Alpha Sensor (12)", "12", "Alpha Sensor")),
-        LookupChoice(id=27, label="Beta Tracker (27)", search_values=("Beta Tracker (27)", "27", "Beta Tracker")),
+        LookupChoice(
+            id=12,
+            label="Alpha Sensor (12)",
+            search_values=("Alpha Sensor (12)", "12", "Alpha Sensor"),
+        ),
+        LookupChoice(
+            id=27,
+            label="Beta Tracker (27)",
+            search_values=("Beta Tracker (27)", "27", "Beta Tracker"),
+        ),
     ]
 
     assert resolve_resource_lookup(choices, "27", model_label="device type") == 27
-    assert resolve_resource_lookup(choices, "Beta Tracker (27)", model_label="device type") == 27
-    assert resolve_resource_lookup(choices, "Beta Tracker", model_label="device type") == 27
+    assert (
+        resolve_resource_lookup(choices, "Beta Tracker (27)", model_label="device type")
+        == 27
+    )
+    assert (
+        resolve_resource_lookup(choices, "Beta Tracker", model_label="device type")
+        == 27
+    )
 
     with pytest.raises(Exception, match="No device type found"):
         resolve_resource_lookup(choices, "Missing", model_label="device type")
@@ -107,7 +121,9 @@ def test_resource_autocomplete_returns_empty_list_for_expected_failures(monkeypa
         lambda ctx: (_ for _ in ()).throw(ControlClientUnavailableError("test")),
     )
 
-    items = resource_autocomplete(DeviceType)(click.Context(click.Command("test")), [], "")
+    items = resource_autocomplete(DeviceType)(
+        click.Context(click.Command("test")), [], ""
+    )
 
     assert items == []
 

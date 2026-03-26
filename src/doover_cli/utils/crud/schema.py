@@ -33,7 +33,9 @@ def get_request_version_name(model_cls: type[Any], method: str) -> str:
         if method in (version.get("methods") or [])
     ]
     if not matching_versions:
-        raise RuntimeError(f"No {method} request version found for {model_cls.__name__}.")
+        raise RuntimeError(
+            f"No {method} request version found for {model_cls.__name__}."
+        )
 
     request_versions = [name for name in matching_versions if name.endswith("Request")]
     if request_versions:

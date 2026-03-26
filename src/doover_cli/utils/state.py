@@ -24,12 +24,12 @@ class State:
         if self._session is None:
             self._session = setup_session(self.profile_name, self.config_manager)
         return self._session
-    
+
     @property
     def renderer(self) -> RendererBase:
         if self._renderer is None:
             self._renderer = setup_renderer(self.renderer_name or Renderer.default)
-            
+
         return self._renderer
 
 

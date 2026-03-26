@@ -34,7 +34,9 @@ class QuestionaryPrompt(click.Option):
     """A custom click option that uses questionary for prompting the user."""
 
     def prepare_choice_list(self, ctx):
-        default = _normalize_choice_default(self.get_default(ctx), self.type.choices) or []
+        default = (
+            _normalize_choice_default(self.get_default(ctx), self.type.choices) or []
+        )
         choice_type = cast(click.Choice, self.type)
         return [
             questionary.Choice(name, checked=name in default)

@@ -37,8 +37,15 @@ def test_render_list_preserves_control_model_field_order():
     renderer.render_list(page)
 
     output = console.export_text()
-    header_line = next(line for line in output.splitlines() if "gamma" in line and "alpha" in line)
-    assert header_line.index("gamma") < header_line.index("alpha") < header_line.index("omega") < header_line.index("beta")
+    header_line = next(
+        line for line in output.splitlines() if "gamma" in line and "alpha" in line
+    )
+    assert (
+        header_line.index("gamma")
+        < header_line.index("alpha")
+        < header_line.index("omega")
+        < header_line.index("beta")
+    )
     assert "Count: 1" in output
 
 
@@ -60,7 +67,9 @@ def test_render_list_omits_columns_that_do_not_fit_terminal_width():
     renderer.render_list(page)
 
     output = console.export_text()
-    header_line = next(line for line in output.splitlines() if "gamma" in line and "alpha" in line)
+    header_line = next(
+        line for line in output.splitlines() if "gamma" in line and "alpha" in line
+    )
     assert "omega" in header_line
     assert "beta" not in header_line
     assert "Showing 3 of 4 columns." in output
@@ -132,7 +141,9 @@ def test_prompt_fields_uses_autocomplete_for_resource(monkeypatch):
     renderer = DefaultRenderer(console=Console(record=True, width=120))
     captured = {}
 
-    def fake_autocomplete(message, choices, default=None, match_middle=None, validate=None):
+    def fake_autocomplete(
+        message, choices, default=None, match_middle=None, validate=None
+    ):
         captured["message"] = message
         captured["choices"] = choices
         captured["default"] = default
@@ -156,8 +167,20 @@ def test_prompt_fields_uses_autocomplete_for_resource(monkeypatch):
                 default=SimpleNamespace(id=9),
                 resource_model_label="solution",
                 resource_lookup_choices=[
-                    LookupChoice(id=9, label="Existing Solution (9)", search_values=("Existing Solution (9)", "9", "Existing Solution")),
-                    LookupChoice(id=11, label="Field Ops (11)", search_values=("Field Ops (11)", "11", "Field Ops")),
+                    LookupChoice(
+                        id=9,
+                        label="Existing Solution (9)",
+                        search_values=(
+                            "Existing Solution (9)",
+                            "9",
+                            "Existing Solution",
+                        ),
+                    ),
+                    LookupChoice(
+                        id=11,
+                        label="Field Ops (11)",
+                        search_values=("Field Ops (11)", "11", "Field Ops"),
+                    ),
                 ],
                 match_middle=True,
             )

@@ -68,7 +68,11 @@ def init_sentry() -> None:
 
 
 def _capture_exception(
-    exc: BaseException, *, handled: bool, command: str | None, message: str | None = None
+    exc: BaseException,
+    *,
+    handled: bool,
+    command: str | None,
+    message: str | None = None,
 ) -> None:
     if not _initialized or not is_enabled():
         return

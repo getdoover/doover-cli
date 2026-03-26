@@ -155,7 +155,7 @@ def get(
     """Get a device type."""
     _ = _profile
     client, renderer = get_state()
-    
+
     resolved_id = prompt_resource(
         DeviceType,
         client,

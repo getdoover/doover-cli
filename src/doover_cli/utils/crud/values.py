@@ -36,7 +36,9 @@ def coerce_cli_value(spec: ModelVersionFieldSpec, raw_value: Any) -> Any:
     # dict payloads, and hydrated model instances.
     if spec.field.type == "resource":
         if isinstance(raw_value, dict):
-            raw_value = raw_value.get("id", raw_value.get(spec.output_id or "", raw_value))
+            raw_value = raw_value.get(
+                "id", raw_value.get(spec.output_id or "", raw_value)
+            )
         else:
             raw_value = getattr(raw_value, "id", raw_value)
         if raw_value is None:

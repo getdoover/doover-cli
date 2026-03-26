@@ -1,4 +1,3 @@
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -70,7 +69,9 @@ class FakeControlClient:
 
 
 def test_humanize_helpers_and_field_kind_resolution():
-    specs = {spec.name: spec for spec in get_model_field_specs(ExamplePromptModel, "POST")}
+    specs = {
+        spec.name: spec for spec in get_model_field_specs(ExamplePromptModel, "POST")
+    }
 
     assert humanize_field_name("solution_id") == "Solution id"
     assert humanize_model_name("DeviceType") == "device type"
@@ -82,7 +83,9 @@ def test_humanize_helpers_and_field_kind_resolution():
 
 
 def test_build_prompt_field_for_spec_sets_installer_and_resource_details():
-    specs = {spec.name: spec for spec in get_model_field_specs(ExamplePromptModel, "POST")}
+    specs = {
+        spec.name: spec for spec in get_model_field_specs(ExamplePromptModel, "POST")
+    }
     client = FakeControlClient()
 
     installer_field = build_prompt_field_for_spec(client, specs["installer"], None)
@@ -105,7 +108,8 @@ def test_build_prompt_field_for_spec_sets_installer_and_resource_details():
 
 def test_normalize_prompted_value_resolves_resource_ids():
     spec = next(
-        spec for spec in get_model_field_specs(ExamplePromptModel, "POST")
+        spec
+        for spec in get_model_field_specs(ExamplePromptModel, "POST")
         if spec.name == "solution"
     )
     field = Field(

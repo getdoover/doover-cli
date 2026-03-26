@@ -1,5 +1,4 @@
 from contextlib import nullcontext
-from pathlib import Path
 from types import SimpleNamespace
 
 import click
@@ -7,7 +6,6 @@ from pydoover.models.control import DeviceType, Solution
 from typer.testing import CliRunner
 
 from doover_cli import app
-from doover_cli.apps import device_type as device_type_app
 from doover_cli.utils import crud
 from doover_cli.utils.crud import LookupChoice
 
@@ -320,7 +318,10 @@ def test_device_type_get_accepts_name_lookup(monkeypatch):
                     captured.setdefault("list_kwargs", kwargs),
                     SimpleNamespace(
                         results=[
-                            SimpleNamespace(id=160631245057827589, name="a test thing that needs to be tested"),
+                            SimpleNamespace(
+                                id=160631245057827589,
+                                name="a test thing that needs to be tested",
+                            ),
                         ],
                         count=1,
                         next=None,
@@ -455,7 +456,9 @@ def test_device_type_update_without_options_fetches_and_prompts(monkeypatch):
                             name="Tracker",
                             config={"mode": "auto"},
                             config_schema={"type": "object"},
-                            solution=SimpleNamespace(id=9, display_name="Existing Solution"),
+                            solution=SimpleNamespace(
+                                id=9, display_name="Existing Solution"
+                            ),
                         ),
                     )[-1],
                     patch=lambda device_type_id, payload: (
@@ -485,9 +488,16 @@ def test_device_type_update_without_options_fetches_and_prompts(monkeypatch):
         "per_page": 100,
     }
     prompted_fields = renderer.prompt_fields_calls[0]
-    assert next(field for field in prompted_fields if field.key == "name").default == "Tracker"
-    assert next(field for field in prompted_fields if field.key == "config").default == {"mode": "auto"}
-    assert next(field for field in prompted_fields if field.key == "solution").default == 9
+    assert (
+        next(field for field in prompted_fields if field.key == "name").default
+        == "Tracker"
+    )
+    assert next(
+        field for field in prompted_fields if field.key == "config"
+    ).default == {"mode": "auto"}
+    assert (
+        next(field for field in prompted_fields if field.key == "solution").default == 9
+    )
     assert captured["patched_device_type_id"] == "55"
     assert captured["payload"] == {
         "name": "Updated Tracker",
@@ -686,7 +696,9 @@ def test_upload_installer_prompts_for_device_type_and_file(monkeypatch, tmp_path
     assert renderer.render_calls == [{"id": 42, "installer": "uploaded"}]
 
 
-def test_upload_installer_tar_prompts_for_device_type_and_directory(monkeypatch, tmp_path):
+def test_upload_installer_tar_prompts_for_device_type_and_directory(
+    monkeypatch, tmp_path
+):
     installer_dir = tmp_path / "installer"
     installer_dir.mkdir()
     (installer_dir / "install.sh").write_text("#!/bin/sh\necho ok\n")

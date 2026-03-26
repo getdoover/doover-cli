@@ -1,4 +1,3 @@
-from cfgv import Not
 import os
 
 import typer
@@ -73,12 +72,12 @@ class DooverCLISession:
         if self._data_client is None:
             self._data_client = DataClient(auth=self.auth)
         return self._data_client
-    
+
     def get_control_client(self) -> ControlClient:
         if self._control_client is None:
             self._control_client = ControlClient(auth=self.auth)
         return self._control_client
-    
+
     def require_agent_id(self, agent_id: int | str | None) -> int:
         if agent_id is None:
             raise typer.BadParameter(

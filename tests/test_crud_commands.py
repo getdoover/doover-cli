@@ -65,7 +65,9 @@ def test_update_callback_signature_includes_resource_id_argument():
     assert "name" in signature.parameters
 
 
-def test_create_callback_prompts_only_when_required_fields_missing(monkeypatch, tmp_path):
+def test_create_callback_prompts_only_when_required_fields_missing(
+    monkeypatch, tmp_path
+):
     renderer = FakeRenderer(
         {
             "name": "Prompted Tracker",

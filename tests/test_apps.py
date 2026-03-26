@@ -5,6 +5,7 @@ from typer.testing import CliRunner
 
 from doover_cli import app
 from doover_cli.apps import apps as apps_app
+
 runner = CliRunner()
 
 
@@ -37,7 +38,13 @@ def _resource_methods(**kwargs):
 
 
 class FakeAppConfig:
-    def __init__(self, *, app_id=None, name="tracker-app", image_name="ghcr.io/getdoover/tracker-app:main"):
+    def __init__(
+        self,
+        *,
+        app_id=None,
+        name="tracker-app",
+        image_name="ghcr.io/getdoover/tracker-app:main",
+    ):
         self.id = app_id
         self.name = name
         self.build_args = "--platform linux/amd64"
@@ -67,9 +74,7 @@ class FakeAppConfig:
     def to_request_payload(self, *, include_deployment_data, is_staging, method="POST"):
         payload = dict(self._payload)
         if include_deployment_data:
-            payload["deployment_data"] = (
-                "staging-data" if is_staging else "from-config"
-            )
+            payload["deployment_data"] = "staging-data" if is_staging else "from-config"
         return payload
 
     def to_dict(self, *, include_deployment_data, is_staging, include_cloud_only):
@@ -425,12 +430,20 @@ def test_app_publish_updates_existing_application(monkeypatch, tmp_path):
     class FakeControlClient:
         applications = FakeApplicationsClient()
 
-    monkeypatch.setattr("doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path)
-    monkeypatch.setattr("doover_cli.apps.apps.get_app_config", lambda root_fp: app_config)
-    monkeypatch.setattr("doover_cli.apps.apps.get_state", lambda: (FakeControlClient(), renderer))
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_config", lambda root_fp: app_config
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_state", lambda: (FakeControlClient(), renderer)
+    )
     monkeypatch.setattr(
         "doover_cli.apps.apps.export_config_command",
-        lambda ctx, app_fp, validate_: captured.setdefault("exported", (app_fp, validate_)),
+        lambda ctx, app_fp, validate_: captured.setdefault(
+            "exported", (app_fp, validate_)
+        ),
     )
     monkeypatch.setattr(
         "doover_cli.apps.apps._build_container",
@@ -489,11 +502,22 @@ def test_app_publish_creates_then_updates_when_missing(monkeypatch, tmp_path):
     class FakeControlClient:
         applications = FakeApplicationsClient()
 
-    monkeypatch.setattr("doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path)
-    monkeypatch.setattr("doover_cli.apps.apps.get_app_config", lambda root_fp: app_config)
-    monkeypatch.setattr("doover_cli.apps.apps.get_state", lambda: (FakeControlClient(), renderer))
-    monkeypatch.setattr("doover_cli.apps.apps.export_config_command", lambda ctx, app_fp, validate_: None)
-    monkeypatch.setattr("doover_cli.apps.apps._build_container", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_config", lambda root_fp: app_config
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_state", lambda: (FakeControlClient(), renderer)
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_config_command",
+        lambda ctx, app_fp, validate_: None,
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps._build_container", lambda *args, **kwargs: None
+    )
     monkeypatch.setattr("doover_cli.apps.apps._push_container", lambda image_name: None)
     monkeypatch.setattr(
         "doover_cli.apps.apps.typer.confirm",
@@ -531,10 +555,19 @@ def test_app_publish_skip_container_avoids_build_and_push(monkeypatch, tmp_path)
     class FakeControlClient:
         applications = FakeApplicationsClient()
 
-    monkeypatch.setattr("doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path)
-    monkeypatch.setattr("doover_cli.apps.apps.get_app_config", lambda root_fp: app_config)
-    monkeypatch.setattr("doover_cli.apps.apps.get_state", lambda: (FakeControlClient(), renderer))
-    monkeypatch.setattr("doover_cli.apps.apps.export_config_command", lambda ctx, app_fp, validate_: None)
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_config", lambda root_fp: app_config
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_state", lambda: (FakeControlClient(), renderer)
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_config_command",
+        lambda ctx, app_fp, validate_: None,
+    )
     monkeypatch.setattr(
         "doover_cli.apps.apps._build_container",
         lambda *args, **kwargs: captured.setdefault("build_called", True),
@@ -557,13 +590,20 @@ def test_app_publish_rejects_fix_me_values(monkeypatch, tmp_path):
     app_config = FakeAppConfig(app_id=101)
     app_config._payload["organisation_id"] = "FIX-ME"
 
-    monkeypatch.setattr("doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path)
-    monkeypatch.setattr("doover_cli.apps.apps.get_app_config", lambda root_fp: app_config)
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_config", lambda root_fp: app_config
+    )
     monkeypatch.setattr(
         "doover_cli.apps.apps.get_state",
         lambda: (_resource_methods(applications=None), renderer),
     )
-    monkeypatch.setattr("doover_cli.apps.apps.export_config_command", lambda ctx, app_fp, validate_: None)
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_config_command",
+        lambda ctx, app_fp, validate_: None,
+    )
 
     result = runner.invoke(app, ["app", "publish", str(tmp_path), "--skip-container"])
 
@@ -585,12 +625,23 @@ def test_app_publish_honours_explicit_staging(monkeypatch, tmp_path):
     class FakeControlClient:
         applications = FakeApplicationsClient()
 
-    monkeypatch.setattr("doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path)
-    monkeypatch.setattr("doover_cli.apps.apps.get_app_config", lambda root_fp: app_config)
-    monkeypatch.setattr("doover_cli.apps.apps.get_state", lambda: (FakeControlClient(), renderer))
-    monkeypatch.setattr("doover_cli.apps.apps.export_config_command", lambda ctx, app_fp, validate_: None)
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_config", lambda root_fp: app_config
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_state", lambda: (FakeControlClient(), renderer)
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_config_command",
+        lambda ctx, app_fp, validate_: None,
+    )
 
-    result = runner.invoke(app, ["app", "publish", str(tmp_path), "--skip-container", "--staging"])
+    result = runner.invoke(
+        app, ["app", "publish", str(tmp_path), "--skip-container", "--staging"]
+    )
 
     assert result.exit_code == 0
     assert captured["body"]["deployment_data"] == "staging-data"
@@ -613,10 +664,19 @@ def test_app_publish_infers_staging_from_control_url(monkeypatch, tmp_path):
     class FakeControlClient:
         applications = FakeApplicationsClient()
 
-    monkeypatch.setattr("doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path)
-    monkeypatch.setattr("doover_cli.apps.apps.get_app_config", lambda root_fp: app_config)
-    monkeypatch.setattr("doover_cli.apps.apps.get_state", lambda: (FakeControlClient(), renderer))
-    monkeypatch.setattr("doover_cli.apps.apps.export_config_command", lambda ctx, app_fp, validate_: None)
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_config", lambda root_fp: app_config
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_state", lambda: (FakeControlClient(), renderer)
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_config_command",
+        lambda ctx, app_fp, validate_: None,
+    )
     monkeypatch.setattr(
         "doover_cli.apps.apps._control_base_url",
         lambda: "https://api.staging.udoover.com",
@@ -644,10 +704,19 @@ def test_app_publish_skips_build_when_requested_by_config(monkeypatch, tmp_path)
     class FakeControlClient:
         applications = FakeApplicationsClient()
 
-    monkeypatch.setattr("doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path)
-    monkeypatch.setattr("doover_cli.apps.apps.get_app_config", lambda root_fp: app_config)
-    monkeypatch.setattr("doover_cli.apps.apps.get_state", lambda: (FakeControlClient(), renderer))
-    monkeypatch.setattr("doover_cli.apps.apps.export_config_command", lambda ctx, app_fp, validate_: None)
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_config", lambda root_fp: app_config
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_state", lambda: (FakeControlClient(), renderer)
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_config_command",
+        lambda ctx, app_fp, validate_: None,
+    )
     monkeypatch.setattr(
         "doover_cli.apps.apps._build_container",
         lambda *args, **kwargs: captured.setdefault("build_called", True),
@@ -665,7 +734,9 @@ def test_app_publish_skips_build_when_requested_by_config(monkeypatch, tmp_path)
     assert renderer.render_calls == [{"id": 101}]
 
 
-def test_app_publish_processor_builds_package_and_releases_version(monkeypatch, tmp_path):
+def test_app_publish_processor_builds_package_and_releases_version(
+    monkeypatch, tmp_path
+):
     captured = {}
     renderer = FakeRenderer()
     app_config = FakeAppConfig(app_id=303)
@@ -693,10 +764,19 @@ def test_app_publish_processor_builds_package_and_releases_version(monkeypatch, 
     class FakeControlClient:
         applications = FakeApplicationsClient()
 
-    monkeypatch.setattr("doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path)
-    monkeypatch.setattr("doover_cli.apps.apps.get_app_config", lambda root_fp: app_config)
-    monkeypatch.setattr("doover_cli.apps.apps.get_state", lambda: (FakeControlClient(), renderer))
-    monkeypatch.setattr("doover_cli.apps.apps.export_config_command", lambda ctx, app_fp, validate_: None)
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_config", lambda root_fp: app_config
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_state", lambda: (FakeControlClient(), renderer)
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_config_command",
+        lambda ctx, app_fp, validate_: None,
+    )
     monkeypatch.setattr(
         "doover_cli.apps.apps.shell_run",
         lambda command, cwd=None: captured.setdefault("build_script", (command, cwd)),

@@ -1,6 +1,10 @@
 from typer import Typer
 
-from .utils.api import AgentAnnotation, ProfileAnnotation, exit_for_unsupported_control_command
+from .utils.api import (
+    AgentAnnotation,
+    ProfileAnnotation,
+    exit_for_unsupported_control_command,
+)
 
 app = Typer(no_args_is_help=True)
 

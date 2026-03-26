@@ -11,14 +11,15 @@ class Renderer(str, Enum):
     default = "default"
     # rich = "rich"
     # table = "table"
-    
-    
+
+
 def setup_renderer(renderer: Renderer) -> RendererBase:
     if renderer is Renderer.json:
         return JsonRenderer()
     if renderer is Renderer.default:
         return DefaultRenderer()
     return BasicRenderer()
+
 
 __all__ = [
     "setup_renderer",

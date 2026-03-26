@@ -23,7 +23,9 @@ def resolve_control_model_class(ref: str) -> type[Any]:
     try:
         model_cls = getattr(control_models, ref)
     except AttributeError as exc:
-        raise RuntimeError(f"Unable to resolve control model class for {ref!r}.") from exc
+        raise RuntimeError(
+            f"Unable to resolve control model class for {ref!r}."
+        ) from exc
     if not isinstance(model_cls, type):
         raise RuntimeError(f"Resolved control model {ref!r} is not a class.")
     return model_cls
@@ -72,11 +74,17 @@ def load_control_model_choices(
                 for field_name in search_fields
             }
             label_text = next(
-                (field_values[field_name] for field_name in label_attrs if field_values.get(field_name)),
+                (
+                    field_values[field_name]
+                    for field_name in label_attrs
+                    if field_values.get(field_name)
+                ),
                 None,
             )
             if label_text is None:
-                fallback_label = (model_label or humanize_model_name(model_cls.__name__)).capitalize()
+                fallback_label = (
+                    model_label or humanize_model_name(model_cls.__name__)
+                ).capitalize()
                 label_text = f"{fallback_label} {resource_id}"
 
             search_values = [f"{label_text} ({resource_id})", str(resource_id)]
@@ -106,7 +114,9 @@ def get_control_lookup_completion_client(
 ) -> Any:
     profile_name = "default"
     if ctx is not None:
-        profile_name = ctx.params.get("_profile") or ctx.params.get("profile") or profile_name
+        profile_name = (
+            ctx.params.get("_profile") or ctx.params.get("profile") or profile_name
+        )
 
     session = setup_session(profile_name)
     return session.get_control_client()
@@ -138,7 +148,9 @@ def resolve_resource_lookup(
     matches = [
         choice
         for choice in choices
-        if any(candidate.casefold() == lowered_lookup for candidate in choice.search_values)
+        if any(
+            candidate.casefold() == lowered_lookup for candidate in choice.search_values
+        )
     ]
 
     unique_matches = {choice.id: choice for choice in matches}
@@ -211,8 +223,7 @@ def resource_autocomplete(
 
         for choice in choices:
             if lowered_incomplete and not any(
-                lowered_incomplete in value.casefold()
-                for value in choice.search_values
+                lowered_incomplete in value.casefold() for value in choice.search_values
             ):
                 continue
             completion_items.append((choice.label, f"ID {choice.id}"))

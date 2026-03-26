@@ -70,7 +70,10 @@ class NoUpdateCrudModel(ControlModel):
 
 
 def test_get_request_version_name_prefers_request_versions():
-    assert get_request_version_name(ExampleCrudModel, "post") == "ExampleCrudSerializerDetailRequest"
+    assert (
+        get_request_version_name(ExampleCrudModel, "post")
+        == "ExampleCrudSerializerDetailRequest"
+    )
 
 
 def test_get_update_method_prefers_patch_and_falls_back_to_put():
@@ -82,7 +85,9 @@ def test_get_update_method_raises_when_no_update_version_exists():
     try:
         get_update_method(NoUpdateCrudModel)
     except RuntimeError as exc:
-        assert str(exc) == "No PATCH or PUT request version found for NoUpdateCrudModel."
+        assert (
+            str(exc) == "No PATCH or PUT request version found for NoUpdateCrudModel."
+        )
     else:
         raise AssertionError("Expected RuntimeError")
 

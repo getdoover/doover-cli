@@ -61,8 +61,13 @@ def test_device_login_returns_populated_auth_client(monkeypatch):
 
     monkeypatch.setattr("doover_cli.api.auth.requests.get", fake_get)
     monkeypatch.setattr("doover_cli.api.auth.requests.post", fake_post)
-    monkeypatch.setattr("doover_cli.api.auth.webbrowser.open", lambda *args, **kwargs: open_calls.append((args, kwargs)))
-    monkeypatch.setattr("doover_cli.api.auth.time.sleep", lambda seconds: sleep_calls.append(seconds))
+    monkeypatch.setattr(
+        "doover_cli.api.auth.webbrowser.open",
+        lambda *args, **kwargs: open_calls.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        "doover_cli.api.auth.time.sleep", lambda seconds: sleep_calls.append(seconds)
+    )
 
     client = DooverCLIAuthClient.device_login()
 
@@ -175,7 +180,9 @@ def test_session_from_env_uses_explicit_data_api_base_url(monkeypatch):
 
 
 def test_session_require_agent_id_rejects_missing_value():
-    auth = DooverCLIAuthClient(token="token", data_base_url="https://data.doover.com/api")
+    auth = DooverCLIAuthClient(
+        token="token", data_base_url="https://data.doover.com/api"
+    )
     session = DooverCLISession(config_manager=None, profile_name=None, auth=auth)
 
     with pytest.raises(typer.BadParameter):

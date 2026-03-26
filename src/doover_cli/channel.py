@@ -10,7 +10,11 @@ from typer import Argument, Typer
 from typing_extensions import Annotated
 
 from .utils import parsers
-from .utils.api import AgentAnnotation, ProfileAnnotation, exit_for_unsupported_control_command
+from .utils.api import (
+    AgentAnnotation,
+    ProfileAnnotation,
+    exit_for_unsupported_control_command,
+)
 from .utils.formatters import format_channel_info
 from .utils.sentry import capture_handled_exception
 from .utils.state import state
@@ -95,14 +99,16 @@ def invoke_local_task(
     ],
     package_path: Annotated[Path, typer.Option(help="Path to the processor package.")],
     channel_name: Annotated[
-        str | None, Argument(help="Take the last message from this channel to start the task")
+        str | None,
+        Argument(help="Take the last message from this channel to start the task"),
     ] = None,
     csv_file: Annotated[
         Path | None,
         typer.Option(help="Path to a CSV export of messages to run the task on."),
     ] = None,
     parallel_processes: Annotated[
-        str | None, typer.Option(help="Number of parallel processes to run the task with.")
+        str | None,
+        typer.Option(help="Number of parallel processes to run the task with."),
     ] = None,
     dry_run: Annotated[
         bool, typer.Option(help="Whether to run the task without invoking it")

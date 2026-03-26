@@ -51,7 +51,9 @@ def test_login_command_writes_default_profile(monkeypatch):
         "doover_cli.api.auth.requests.post",
         lambda url, params, timeout: next(responses),
     )
-    monkeypatch.setattr("doover_cli.api.auth.webbrowser.open", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "doover_cli.api.auth.webbrowser.open", lambda *args, **kwargs: None
+    )
     monkeypatch.setattr("doover_cli.api.auth.time.sleep", lambda seconds: None)
 
     result = runner.invoke(app, ["login"])

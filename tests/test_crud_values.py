@@ -1,4 +1,3 @@
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -54,7 +53,9 @@ def test_parse_optional_bool_rejects_invalid_values():
 
 
 def test_coerce_cli_value_handles_json_integer_boolean_resource_and_paths(tmp_path):
-    specs = {spec.name: spec for spec in get_model_field_specs(ExampleValueModel, "POST")}
+    specs = {
+        spec.name: spec for spec in get_model_field_specs(ExampleValueModel, "POST")
+    }
     installer = tmp_path / "installer.sh"
 
     assert coerce_cli_value(specs["config"], '{"mode":"auto"}') == {"mode": "auto"}

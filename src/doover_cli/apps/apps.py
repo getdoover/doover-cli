@@ -25,7 +25,12 @@ import questionary
 
 from ..config_schema import export as export_config_command
 from ..utils.api import ProfileAnnotation
-from ..utils.apps import get_app_directory, call_with_uv, get_docker_path, get_app_config
+from ..utils.apps import (
+    get_app_directory,
+    call_with_uv,
+    get_docker_path,
+    get_app_config,
+)
 from ..utils.crud import (
     build_update_command,
     parse_optional_bool,
@@ -92,7 +97,9 @@ def _resolve_staging(staging: bool | None) -> bool:
     return ".staging." in _control_base_url()
 
 
-def _build_container(root_fp: Path, *, buildx: bool, build_args: str, image_name: str) -> None:
+def _build_container(
+    root_fp: Path, *, buildx: bool, build_args: str, image_name: str
+) -> None:
     shell_run(
         f"docker {'buildx' if buildx else ''} build {build_args} -t {image_name} {str(root_fp)}",
     )
@@ -102,7 +109,9 @@ def _push_container(image_name: str) -> None:
     shell_run(f"docker push {image_name}")
 
 
-def _require_publish_value(name: str, value, *, allow_empty_list: bool = False, allow_none: bool = False):
+def _require_publish_value(
+    name: str, value, *, allow_empty_list: bool = False, allow_none: bool = False
+):
     if value == "FIX-ME":
         raise typer.BadParameter(
             f"{name} is set to FIX-ME in doover_config.json. Update it before publishing."
@@ -133,7 +142,9 @@ def _build_application_payload(
     _require_publish_value("description", payload["description"])
     _require_publish_value("type", payload["type"])
     _require_publish_value("visibility", payload["visibility"])
-    _require_publish_value("organisation_id", payload["organisation_id"], allow_none=True)
+    _require_publish_value(
+        "organisation_id", payload["organisation_id"], allow_none=True
+    )
     _require_publish_value(
         "container_registry_profile_id",
         payload["container_registry_profile_id"],
@@ -144,7 +155,13 @@ def _build_application_payload(
     if include_deployment_data is False:
         payload.pop("deployment_data", None)
 
-    return {key: value for key, value in payload.items() if value is not None or key == "organisation_id" or key == "container_registry_profile_id"}
+    return {
+        key: value
+        for key, value in payload.items()
+        if value is not None
+        or key == "organisation_id"
+        or key == "container_registry_profile_id"
+    }
 
 
 def _get_persisted_application_id(app_config, *, staging: bool) -> int | None:
@@ -165,7 +182,9 @@ def _persist_application_id(app_config, *, staging: bool, application_id: int) -
     app_config.save_to_disk()
 
 
-def _resolve_existing_application_id(client, app_config, *, staging: bool) -> int | None:
+def _resolve_existing_application_id(
+    client, app_config, *, staging: bool
+) -> int | None:
     app_id = _get_persisted_application_id(app_config, staging=staging)
     if app_id is not None:
         return app_id
@@ -176,14 +195,18 @@ def _resolve_existing_application_id(client, app_config, *, staging: bool) -> in
         page=1,
         per_page=100,
     )
-    matches = [item for item in page.results if getattr(item, "name", None) == app_config.name]
+    matches = [
+        item for item in page.results if getattr(item, "name", None) == app_config.name
+    ]
     if len(matches) > 1:
         raise typer.BadParameter(
             f"Multiple applications found matching name '{app_config.name}'. Set the application id in doover_config.json."
         )
     if len(matches) == 1:
         application_id = int(matches[0].id)
-        _persist_application_id(app_config, staging=staging, application_id=application_id)
+        _persist_application_id(
+            app_config, staging=staging, application_id=application_id
+        )
         return application_id
     return None
 
@@ -490,7 +513,9 @@ def list_(
         int | None, typer.Option("--per-page", help="Number of records per page.")
     ] = None,
     search: Annotated[str | None, typer.Option(help="Full-text search term.")] = None,
-    stars: Annotated[int | None, typer.Option(help="Filter by exact stars value.")] = None,
+    stars: Annotated[
+        int | None, typer.Option(help="Filter by exact stars value.")
+    ] = None,
     stars_gt: Annotated[
         int | None,
         typer.Option("--stars-gt", help="Filter by stars greater than this value."),
@@ -513,7 +538,9 @@ def list_(
             help="Filter by stars less than or equal to this value.",
         ),
     ] = None,
-    type: Annotated[str | None, typer.Option(help="Filter by application type.")] = None,
+    type: Annotated[
+        str | None, typer.Option(help="Filter by application type.")
+    ] = None,
     visibility: Annotated[
         str | None, typer.Option(help="Filter by application visibility.")
     ] = None,
@@ -833,7 +860,9 @@ def publish(
             #     app_config,
             #     staging=resolved_staging,
             # )
-            application_id = _get_persisted_application_id(app_config, staging=resolved_staging)
+            application_id = _get_persisted_application_id(
+                app_config, staging=resolved_staging
+            )
             if application_id is None:
                 print(json.dumps(payload, indent=4))
                 created = client.applications.create(body=dict(payload))

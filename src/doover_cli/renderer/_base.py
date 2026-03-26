@@ -7,24 +7,24 @@ if TYPE_CHECKING:
 
 class EmptyEnterable:
     def __enter__(self):
-      pass
+        pass
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-      pass
+        pass
+
 
 class RendererBase:
-  
     def loading(self, message: str) -> ContextManager[Any]:
-      raise NotImplementedError()
-    
+        raise NotImplementedError()
+
     def prompt_fields(self, fields: list["Field"]) -> dict[str, Any]:
-      raise NotImplementedError()
+        raise NotImplementedError()
 
     def render_list(self, data: list[Any] | ControlPage[Any]) -> None:
-      raise NotImplementedError()
-    
+        raise NotImplementedError()
+
     def render(self, data: dict[str, Any] | ControlModel) -> None:
-      raise NotImplementedError()
+        raise NotImplementedError()
 
 
 def normalize_render_data(data: Any) -> Any:
