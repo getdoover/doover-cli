@@ -526,7 +526,7 @@ requires-dist = [
     { name = "jsf", specifier = ">=0.11.2" },
     { name = "paramiko", specifier = ">=3.5.1" },
     { name = "prompt-toolkit", specifier = "==3.0.51" },
-    { name = "pydoover", git = "https://github.com/getdoover/pydoover?branch=doover-2" },
+    { name = "pydoover", git = "https://github.com/getdoover/pydoover?rev=5208743f6a1448a7653ce5694555539c026c11b5" },
     { name = "pytz", specifier = ">=2025.2" },
     { name = "questionary", specifier = ">=1.10.0" },
     { name = "requests", specifier = ">=2.32.3" },
@@ -1188,7 +1188,7 @@ wheels = [
 [[package]]
 name = "pydoover"
 version = "0.4.18"
-source = { git = "https://github.com/getdoover/pydoover?branch=doover-2#5208743f6a1448a7653ce5694555539c026c11b5" }
+source = { git = "https://github.com/getdoover/pydoover?rev=5208743f6a1448a7653ce5694555539c026c11b5#5208743f6a1448a7653ce5694555539c026c11b5" }
 dependencies = [
     { name = "aiohttp" },
     { name = "requests" },
