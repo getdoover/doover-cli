@@ -24,6 +24,7 @@ import questionary
 
 
 from ..config_schema import export as export_config_command
+from ..ui_schema import export as export_ui_command
 from ..utils.api import ProfileAnnotation
 from ..utils.apps import (
     get_app_directory,
@@ -704,6 +705,76 @@ def unarchive(
     renderer.render(response)
 
 
+@app.command(name="put-widget")
+def put_widget(
+    app_fp: Annotated[
+        Path, typer.Argument(help="Path to the application directory.")
+    ] = Path(),
+    widget_fp: Annotated[
+        Path | None,
+        typer.Option(
+            help="Path to the widget file. Defaults to the widget path in doover_config.json."
+        ),
+    ] = None,
+    staging: Annotated[
+        bool | None,
+        typer.Option(
+            help="Whether to force staging mode. Defaults to working it out based on the API URL."
+        ),
+    ] = None,
+    _profile: ProfileAnnotation = None,
+):
+    """Upload a widget file for an application."""
+    _ = _profile
+    root_fp = get_app_directory(app_fp)
+    app_config = get_app_config(root_fp)
+    client, renderer = get_state()
+
+    resolved_staging = _resolve_staging(staging)
+    application_id = _get_persisted_application_id(app_config, staging=resolved_staging)
+    if application_id is None:
+        rich.print(
+            "[red]No application ID found in doover_config.json. Publish the app first.[/red]"
+        )
+        raise typer.Exit(1)
+
+    if widget_fp is None:
+        if app_config.widget_path is None:
+            rich.print(
+                "[red]No widget path provided and none found in doover_config.json.[/red]"
+            )
+            raise typer.Exit(1)
+        widget_fp = app_config.widget_path
+
+    if not widget_fp.exists():
+        rich.print(f"[red]Widget file not found at {widget_fp}.[/red]")
+        raise typer.Exit(1)
+
+    with renderer.loading("Uploading widget..."):
+        client.applications.widget(
+            str(application_id),
+            body={"file": widget_fp},
+        )
+
+    rich.print("[green]Widget uploaded successfully.[/green]")
+
+
+@app.command(name="build-widget")
+def build_widget(
+    app_fp: Annotated[
+        Path, typer.Argument(help="Path to the application directory.")
+    ] = Path(),
+):
+    """Build the widget for an application.
+
+    Runs the build_widget_command from doover_config.json, or defaults to `npm run build`.
+    """
+    root_fp = get_app_directory(app_fp)
+    app_config = get_app_config(root_fp)
+    command = app_config.build_widget_command or "npm run build"
+    shell_run(command, cwd=root_fp)
+
+
 @app.command(
     context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
 )
@@ -812,6 +883,24 @@ def publish(
             help="Export the application configuration before publishing.",
         ),
     ] = True,
+    export_ui: Annotated[
+        bool,
+        typer.Option(
+            help="Export the application UI schema before publishing.",
+        ),
+    ] = True,
+    build_widget: Annotated[
+        bool,
+        typer.Option(
+            help="Build the widget before publishing. Disable with --no-build-widget.",
+        ),
+    ] = True,
+    put_widget: Annotated[
+        bool,
+        typer.Option(
+            help="Upload the widget when publishing. Disable with --no-put-widget.",
+        ),
+    ] = True,
     buildx: Annotated[
         bool,
         typer.Option(
@@ -838,6 +927,15 @@ def publish(
             typer.confirm("Do you want to continue?", abort=True)
         else:
             rich.print("[green]Exported application configuration.[/green]")
+
+    if export_ui:
+        try:
+            ctx.invoke(export_ui_command, ctx, app_fp=root_fp, validate_=True)
+        except Exception as exc:
+            rich.print(f"[red]Failed to export UI schema: {exc}[/red]\n")
+            typer.confirm("Do you want to continue?", abort=True)
+        else:
+            rich.print("[green]Exported UI schema.[/green]")
 
     app_config = get_app_config(root_fp)
     resolved_staging = _resolve_staging(staging)
@@ -890,6 +988,26 @@ def publish(
             message=f"Failed to update application: {exc}",
         )
         raise typer.Exit(1) from exc
+
+    if app_config.widget_path is not None:
+        if build_widget:
+            build_cmd = app_config.build_widget_command or "npm run build"
+            rich.print(f"\nBuilding widget with: [blue]{build_cmd}[/blue]")
+            shell_run(build_cmd, cwd=root_fp)
+
+        if put_widget:
+            if not app_config.widget_path.exists():
+                rich.print(
+                    f"[red]Widget file not found at {app_config.widget_path}.[/red]"
+                )
+                raise typer.Exit(1)
+
+            with renderer.loading("Uploading widget..."):
+                client.applications.widget(
+                    str(application_id),
+                    body={"file": app_config.widget_path},
+                )
+            rich.print("[green]Widget uploaded.[/green]")
 
     if getattr(app_config, "build_args", None) == "NO_BUILD":
         print("App requested to not build. Skipping build step.")

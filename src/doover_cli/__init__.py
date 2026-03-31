@@ -8,6 +8,7 @@ from pydoover.api.auth import ConfigManager
 
 from .apps.apps import app as apps_app
 from .config_schema import app as config_schema_app
+from .ui_schema import app as ui_schema_app
 from .simulator import app as simulators_app
 from .agent import app as agents_app
 from .channel import app as channels_app
@@ -28,6 +29,7 @@ app.add_typer(
 app.add_typer(
     config_schema_app, name="config-schema", help="Manage application config schemas."
 )
+app.add_typer(ui_schema_app, name="ui-schema", help="Manage application UI schemas.")
 app.add_typer(
     simulators_app, name="simulator", help="Manage simulators and their configurations."
 )

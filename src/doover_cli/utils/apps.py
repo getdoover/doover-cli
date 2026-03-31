@@ -33,6 +33,7 @@ class LocalApplication(ControlApplication):
         visibility: str | None = None,
         allow_many: bool | None = None,
         config_schema: Any | None = None,
+        ui_schema: Any | None = None,
         depends_on: list[str] | None = None,
         organisation: dict[str, Any] | str | int | None = None,
         approx_installs: int | None = None,
@@ -49,7 +50,10 @@ class LocalApplication(ControlApplication):
         code_repo_id: str | int | None = None,
         repo_branch: str | None = None,
         build_args: str | None = None,
+        widget: str | Path | None = None,
+        build_widget_command: str | None = None,
         export_config_command: str | None = None,
+        export_ui_command: str | None = None,
         run_command: str | None = None,
         staging_config: dict[str, Any] | None = None,
         base_path: Path | None = None,
@@ -65,6 +69,7 @@ class LocalApplication(ControlApplication):
             visibility=visibility,
             allow_many=allow_many,
             config_schema=config_schema,
+            ui_schema=ui_schema,
             depends_on=depends_on,
             organisation=organisation,
             approx_installs=approx_installs,
@@ -89,11 +94,22 @@ class LocalApplication(ControlApplication):
         else:
             self.long_description = str(long_description or "")
 
+        self._widget_raw = str(widget) if widget else None
+        if widget is not None:
+            widget_path = Path(widget)
+            if not widget_path.is_absolute() and base_path is not None:
+                widget_path = base_path / widget_path
+            self.widget_path: Path | None = widget_path
+        else:
+            self.widget_path = None
+
+        self.build_widget_command = build_widget_command
         self.key = key
         self.code_repo_id = code_repo_id
         self.repo_branch = repo_branch or "main"
         self.build_args = build_args
         self.export_config_command = export_config_command
+        self.export_ui_command = export_ui_command
         self.run_command = run_command
         self.staging_config = staging_config or {}
         self.base_path = base_path
@@ -146,9 +162,13 @@ class LocalApplication(ControlApplication):
             ),
             lambda_arn=data.get("lambda_arn"),
             lambda_config=data.get("lambda_config"),
+            widget=data.get("widget"),
+            build_widget_command=data.get("build_widget_command"),
             export_config_command=data.get("export_config_command"),
+            export_ui_command=data.get("export_ui_command"),
             run_command=data.get("run_command"),
             config_schema=data.get("config_schema"),
+            ui_schema=data.get("ui_schema"),
             staging_config=data.get("staging_config", {}),
             icon_url=data.get("icon_url"),
             banner_url=data.get("banner_url"),
@@ -199,14 +219,20 @@ class LocalApplication(ControlApplication):
                 "image_name": self.image_name,
                 "lambda_config": self.lambda_config,
                 "config_schema": self.config_schema,
+                "ui_schema": self.ui_schema,
                 "icon_url": self.icon_url,
                 "banner_url": self.banner_url,
             }
         )
 
+        if self._widget_raw is not None:
+            data["widget"] = self._widget_raw
+
         if include_deployment_data is False:
             data["staging_config"] = self.staging_config
+            data["build_widget_command"] = self.build_widget_command
             data["export_config_command"] = self.export_config_command
+            data["export_ui_command"] = self.export_ui_command
             data["run_command"] = self.run_command
 
         if include_cloud_only:
@@ -310,7 +336,14 @@ def get_docker_path() -> Path:
     return Path(docker_path)
 
 
+_app_config_cache: dict[Path, "LocalApplication"] = {}
+
+
 def get_app_config(root_fp: Path) -> Any:
+    resolved = root_fp.resolve()
+    if resolved in _app_config_cache:
+        return _app_config_cache[resolved]
+
     config_path = root_fp / "doover_config.json"
     if not config_path.exists():
         print(f"Configuration file not found at {config_path}.")
@@ -332,6 +365,7 @@ def get_app_config(root_fp: Path) -> Any:
         )
         raise typer.Exit(1)
     elif len(result) == 1:
+        _app_config_cache[resolved] = result[0]
         return result[0]
     elif len(result) > 1:
         lookup = {r.name: r for r in result}
@@ -339,9 +373,6 @@ def get_app_config(root_fp: Path) -> Any:
             "Multiple application configurations found. Please select one:",
             choices=list(lookup.keys()),
         ).ask()
-        return lookup[choice]
-
-        # raise ValueError(
-        #     f"Multiple application configurations found in the `doover_config.json` file at {root_fp}. "
-        #     "Make sure the `type` is set to `application` in the configuration."
-        # )
+        selected = lookup[choice]
+        _app_config_cache[resolved] = selected
+        return selected
