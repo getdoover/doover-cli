@@ -8,6 +8,8 @@ from typing import Annotated, Any
 
 import typer
 
+from .utils.sentry import capture_handled_exception
+
 app = typer.Typer(no_args_is_help=True)
 
 
@@ -42,6 +44,11 @@ def dbm_to_json(
             f"Error reading DBM file {dbm_file}: {e}.\n\n"
             f"Try first dumping the DBM file using `gdbm_dump dda_queue.dbm my_dump.dump` "
             f"and then use `doover dda-logs dbm-backup-to-json`."
+        )
+        capture_handled_exception(
+            e,
+            command="dda-logs.dbm-to-json",
+            message=f"Error reading DBM file {dbm_file}: {e}",
         )
         raise typer.Exit(1)
 

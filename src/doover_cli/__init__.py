@@ -1,21 +1,25 @@
+from doover_cli.renderer import Renderer
 from typing import Annotated, Optional
 
+import click
 import typer
 
-from pydoover.cloud.api import ConfigManager
+from pydoover.api.auth import ConfigManager
 
-from .apps import app as apps_app
+from .apps.apps import app as apps_app
 from .config_schema import app as config_schema_app
+from .ui_schema import app as ui_schema_app
 from .simulator import app as simulators_app
 from .agent import app as agents_app
 from .channel import app as channels_app
 from .doover_config import app as doover_config_app
 from .dda_logs import app as dda_logs_app
-from .device_type import app as device_type_app
+from .apps.device_type import app as device_type_app
 from .grpc import app as grpc_app
 from .login import app as login_app
 from .report import app as reports_app
 from .tunnel import app as tunnels_app
+from .utils import sentry as sentry_utils
 from .utils.state import state
 
 app = typer.Typer(no_args_is_help=True)
@@ -25,6 +29,7 @@ app.add_typer(
 app.add_typer(
     config_schema_app, name="config-schema", help="Manage application config schemas."
 )
+app.add_typer(ui_schema_app, name="ui-schema", help="Manage application UI schemas.")
 app.add_typer(
     simulators_app, name="simulator", help="Manage simulators and their configurations."
 )
@@ -62,14 +67,23 @@ def load_ctx(
     json: Annotated[
         bool, typer.Option(help="Set flag to output results in json format")
     ] = False,
+    render: Annotated[
+        Renderer, typer.Option(help="Set flag to output results in json format")
+    ] = Renderer.default,
     version: Annotated[
         Optional[bool], typer.Option("--version", callback=version_callback)
     ] = None,
 ):
-    state.agent_query = None
+    state.agent_id = None
+    state.profile_name = "default"
     state.config_manager = ConfigManager("default")
+    state._session = None
     state.debug = debug
-    state.json = json
+
+    if render is not None and json:
+        raise typer.BadParameter("Cannot use --json and --renderer together.")
+
+    state.renderer_name = render
 
     # return ctx.invoke(ctx.obj, *args, **kwargs)
 
@@ -78,4 +92,20 @@ def main():
     """
     Main entry point for the Doover CLI.
     """
-    app()
+    sentry_utils.init_sentry()
+
+    try:
+        app()
+    except click.exceptions.Exit:
+        raise
+    except click.Abort:
+        raise
+    except Exception as exc:
+        sentry_utils._capture_exception(
+            exc,
+            handled=False,
+            command=sentry_utils.current_command_path(),
+        )
+        raise
+    finally:
+        sentry_utils.flush_sentry()

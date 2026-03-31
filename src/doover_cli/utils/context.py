@@ -3,12 +3,13 @@ from typing import TYPE_CHECKING
 import typer
 
 if TYPE_CHECKING:
-    from pydoover.cloud.api import Client, ConfigManager
+    from pydoover.api.auth import ConfigManager
+
+    from doover_cli.api import DooverCLISession
 
 
 class Context(typer.Context):
-    api: "Client"
+    session: "DooverCLISession"
     config_manager: "ConfigManager"
-    agent_query: str
-    agent_id: str
-    agent: str
+    profile_name: str
+    agent_id: int

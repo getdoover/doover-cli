@@ -4,20 +4,22 @@ version = "0.2.0"
 description = "CLI for Doover"
 requires-python = ">=3.11"
 dependencies = [
-    "click<8.2.0",
+    "click>=8.3.1",
     "click-prompt>=0.6.3",
-    "prompt-toolkit==3.0.51",
+    "prompt-toolkit>=3.0.52",
     "docker>=7.1.0",
     "jsf>=0.11.2",
     "paramiko>=3.5.1",
-    "pydoover>=0.4.11",
+    "pydoover==1.0.0a3",
     "pytz>=2025.2",
     "questionary>=1.10.0",
     "requests>=2.32.3",
-    "typer==0.15.1",
+    "sentry-sdk>=2,<3",
+    "typer==0.24.1",
     "tzlocal>=5.3.1",
     "xlsxwriter>=3.2.3",
-    "prompt-toolkit==3.0.51",
+    "rich>=14.3.3",
+    "textual>=8.1.1",
 ]
 
 [build-system]
@@ -34,4 +36,8 @@ dev = [
 ]
 
 [tool.uv.sources]
-pydoover = { git = "https://github.com/getdoover/pydoover", branch = "doover-2" }
+pydoover = { git = "https://github.com/getdoover/pydoover" }
+
+[tool.ty.environment]
+python = "./.venv"
+

@@ -1,21 +1,36 @@
+import json
+import mimetypes
 import time
 from pathlib import Path
 
 import typer
-from pydoover.cloud.api.channel import Task, Processor
+from pydoover.api import DataClient, NotFoundError
+from pydoover.models.data.attachment import File
+from typer import Argument, Typer
 from typing_extensions import Annotated
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
-from pydoover.cloud.api import NotFound, Message
-
-from typer import Argument, Option, Typer
 
 from .utils import parsers
+from .utils.api import (
+    AgentAnnotation,
+    ProfileAnnotation,
+    exit_for_unsupported_control_command,
+)
 from .utils.formatters import format_channel_info
+from .utils.sentry import capture_handled_exception
 from .utils.state import state
-from .utils.api import ProfileAnnotation, AgentAnnotation
 
 app = Typer(no_args_is_help=True)
+
+
+def _get_data_client_and_agent_id() -> tuple[DataClient, int]:
+    session = state.session
+    return session.get_data_client(), session.require_agent_id(state.agent_id)
+
+
+def _coerce_aggregate_payload(message) -> dict:
+    if isinstance(message, dict):
+        return message
+    return {"value": message}
 
 
 @app.command()
@@ -24,17 +39,21 @@ def get(
     _profile: ProfileAnnotation = None,
     _agent: AgentAnnotation = None,
 ):
-    """Get channel info"""
+    """Get channel info."""
+    client, agent_id = _get_data_client_and_agent_id()
+
     try:
-        channel = state.api.get_channel(channel_name)
-    except NotFound:
-        try:
-            channel = state.api.get_channel_named(channel_name, state.agent_id)
-        except NotFound as e:
-            print("Channel not found. Is it owned by this agent?")
-            if state.debug:
-                raise e
-            raise typer.Exit(1)
+        channel = client.fetch_channel(agent_id, channel_name, include_aggregate=True)
+    except NotFoundError as exc:
+        print("Channel not found. Is it owned by this agent?")
+        if state.debug:
+            raise
+        capture_handled_exception(
+            exc,
+            command="channel.get",
+            message="Channel not found. Is it owned by this agent?",
+        )
+        raise typer.Exit(1) from exc
 
     print(format_channel_info(channel))
 
@@ -45,9 +64,11 @@ def create(
     _profile: ProfileAnnotation = None,
     _agent: AgentAnnotation = None,
 ):
-    """Create new channel"""
-    channel = state.api.create_channel(channel_name, state.agent_id)
-    print(f"Channel created successfully. ID: {channel.id}")
+    """Create new channel."""
+    client, agent_id = _get_data_client_and_agent_id()
+    channel_id = client.create_channel(agent_id, channel_name)
+    channel = client.fetch_channel(agent_id, channel_name, include_aggregate=True)
+    print(f"Channel created successfully. ID: {channel_id}")
     print(format_channel_info(channel))
 
 
@@ -67,27 +88,8 @@ def create_task(
     _agent: AgentAnnotation = None,
 ):
     """Create new task channel."""
-    processor = state.api.get_channel_named(processor_name, state.agent_id)
-    task = state.api.create_task(task_name, state.agent_id, processor.id)
-    print(f"Task created successfully. ID: {task.id}")
-    print(format_channel_info(task))
-
-
-def run_for_single_message(
-    task, package_path, agent, dry_run, msg_obj, *args, **kwargs
-):
-    if dry_run:
-        return "Dry run successful. Task not invoked."
-    msg_dict = msg_obj.to_dict() if msg_obj else None
-    task.invoke_locally(
-        package_path, msg_dict, {"deployment_config": agent.deployment_config}
-    )
-    output = (
-        f"Task invoked successfully. Message ID: {msg_obj.id if msg_obj else None}."
-    )
-    if kwargs:
-        output = output + f" Extra kwargs: {kwargs}"
-    return output
+    _ = (task_name, processor_name, _profile, _agent)
+    exit_for_unsupported_control_command("channel.create-task")
 
 
 @app.command()
@@ -95,84 +97,37 @@ def invoke_local_task(
     task_name: Annotated[
         str, Argument(parser=parsers.task_name, help="Task channel name to create.")
     ],
-    package_path: Annotated[
-        Path,
-        Option(
-            exists=True,
-            file_okay=False,
-            dir_okay=True,
-            resolve_path=True,
-            help="Path to the processor package to publish",
-        ),
-    ],
+    package_path: Annotated[Path, typer.Option(help="Path to the processor package.")],
     channel_name: Annotated[
-        str, Argument(help="Take the last message from this channel to start the task")
+        str | None,
+        Argument(help="Take the last message from this channel to start the task"),
     ] = None,
     csv_file: Annotated[
-        Path,
-        Option(
-            exists=True,
-            file_okay=True,
-            dir_okay=False,
-            resolve_path=True,
-            help="Path to a CSV export of messages to run the task on.",
-        ),
+        Path | None,
+        typer.Option(help="Path to a CSV export of messages to run the task on."),
     ] = None,
     parallel_processes: Annotated[
-        str, Option(help="Number of parallel processes to run the task with.")
+        str | None,
+        typer.Option(help="Number of parallel processes to run the task with."),
     ] = None,
     dry_run: Annotated[
-        bool, Option(help="Whether to run the task without invoking it")
+        bool, typer.Option(help="Whether to run the task without invoking it")
     ] = False,
     _profile: ProfileAnnotation = None,
     _agent: AgentAnnotation = None,
 ):
     """Invoke a task locally."""
-    task = state.api.get_channel_named(task_name, state.agent_id)
-    if not isinstance(task, Task):
-        print("That wasn't a task channel. Try again?")
-        return
-    print(format_channel_info(task))
-
-    agent = state.api.get_agent(state.agent_id)
-
-    if csv_file is not None:
-        messages = Message.from_csv_export(state.api, csv_file)
-        print(f"Loaded {len(messages)} messages from CSV export.")
-
-        if not parallel_processes or parallel_processes == 1:
-            for msg in messages:
-                print(
-                    f"\nRunning task for message: {msg.id}, with timestamp: {msg.timestamp}. {messages.index(msg) + 1}/{len(messages)}\n"
-                )
-                run_for_single_message(task, package_path, agent, dry_run, msg)
-        else:
-            with ThreadPoolExecutor(max_workers=parallel_processes) as executor:
-                futures = [
-                    executor.submit(
-                        run_for_single_message,
-                        msg,
-                        task_num=messages.index(msg),
-                        total_tasks=len(messages),
-                    )
-                    for msg in messages
-                ]
-                for future in as_completed(futures):
-                    print(future.result())
-
-    else:
-        msg_obj = None
-        if channel_name:
-            channel = state.api.get_channel_named(channel_name, state.agent_id)
-            msg_obj = channel.last_message
-
-        if not msg_obj:
-            print("No message found. running task without a message.")
-        else:
-            print(
-                f"\nRunning task for message: {msg_obj.id}, with timestamp: {msg_obj.timestamp}\n"
-            )
-        run_for_single_message(task, package_path, agent, dry_run, msg_obj)
+    _ = (
+        task_name,
+        package_path,
+        channel_name,
+        csv_file,
+        parallel_processes,
+        dry_run,
+        _profile,
+        _agent,
+    )
+    exit_for_unsupported_control_command("channel.invoke-local-task")
 
 
 @app.command()
@@ -184,9 +139,8 @@ def create_processor(
     _agent: AgentAnnotation = None,
 ):
     """Create new processor channel."""
-    processor = state.api.create_processor(processor_name, state.agent_id)
-    print(f"Processor created successfully. ID: {processor.id}")
-    print(format_channel_info(processor))
+    _ = (processor_name, _profile, _agent)
+    exit_for_unsupported_control_command("channel.create-processor")
 
 
 @app.command()
@@ -198,17 +152,31 @@ def publish(
     _profile: ProfileAnnotation = None,
     _agent: AgentAnnotation = None,
 ):
-    """Publish to a doover channel."""
+    """Publish to a Doover channel aggregate."""
+    client, agent_id = _get_data_client_and_agent_id()
+    payload = _coerce_aggregate_payload(message)
+
     try:
-        channel = state.api.get_channel_named(channel_name, state.agent_id)
-    except NotFound:
+        client.update_channel_aggregate(
+            agent_id,
+            channel_name,
+            data=payload,
+            replace=False,
+            log_update=True,
+        )
+    except NotFoundError as exc:
         print("Channel name was incorrect. Is it owned by this agent?")
-        return
+        if state.debug:
+            raise
+        capture_handled_exception(
+            exc,
+            command="channel.publish",
+            message="Channel name was incorrect. Is it owned by this agent?",
+        )
+        raise typer.Exit(1) from exc
 
     if isinstance(message, dict):
         print("Successfully loaded message as JSON.")
-
-    channel.publish(message)
     print("Successfully published message.")
 
 
@@ -219,18 +187,36 @@ def publish_file(
     _profile: ProfileAnnotation = None,
     _agent: AgentAnnotation = None,
 ):
-    """Publish file to a processor channel."""
-    if not file_path.exists():
-        print("File path was incorrect.")
-        return
+    """Publish a file to a channel aggregate."""
+    client, agent_id = _get_data_client_and_agent_id()
+    mime_type, _ = mimetypes.guess_type(file_path)
+    attachment = File(
+        filename=file_path.name,
+        content_type=mime_type or "application/octet-stream",
+        size=file_path.stat().st_size,
+        data=file_path.read_bytes(),
+    )
 
     try:
-        channel = state.api.get_channel_named(channel_name, state.agent_id)
-    except NotFound:
+        client.update_channel_aggregate(
+            agent_id,
+            channel_name,
+            data={"output_type": attachment.content_type},
+            replace=True,
+            files=[attachment],
+            log_update=True,
+        )
+    except NotFoundError as exc:
         print("Channel name was incorrect. Is it owned by this agent?")
-        return
+        if state.debug:
+            raise
+        capture_handled_exception(
+            exc,
+            command="channel.publish-file",
+            message="Channel name was incorrect. Is it owned by this agent?",
+        )
+        raise typer.Exit(1) from exc
 
-    channel.update_from_file(file_path)
     print("Successfully published new file.")
 
 
@@ -247,43 +233,34 @@ def publish_processor(
     _agent: AgentAnnotation = None,
 ):
     """Publish processor package to a processor channel."""
-    if not package_path.exists():
-        print("Package path was incorrect.")
-        return
-
-    try:
-        channel = state.api.get_channel_named(processor_name, state.agent_id)
-    except NotFound:
-        print("Channel name was incorrect. Is it owned by this agent?")
-        return
-
-    if not isinstance(channel, Processor):
-        print("Channel name is not a processor. Try a different name?")
-        return
-
-    channel.update_from_package(package_path)
-    print("Successfully published new package.")
+    _ = (processor_name, package_path, _profile, _agent)
+    exit_for_unsupported_control_command("channel.publish-processor")
 
 
 @app.command()
 def follow(
-    channel_name: Annotated[str, Argument(help="Channel name to publish to")],
+    channel_name: Annotated[str, Argument(help="Channel name to follow")],
     poll_rate: Annotated[
         int, Argument(help="Frequency to check for new messages (in seconds)")
     ] = 5,
     _profile: ProfileAnnotation = None,
     _agent: AgentAnnotation = None,
 ):
-    """Follow aggregate of a doover channel"""
-    channel = state.api.get_channel_named(channel_name, state.agent_id)
+    """Follow aggregate of a Doover channel."""
+    client, agent_id = _get_data_client_and_agent_id()
+    channel = client.fetch_channel(agent_id, channel_name, include_aggregate=True)
     print(format_channel_info(channel))
 
+    old_aggregate = channel.aggregate.to_dict() if channel.aggregate else None
     while True:
-        old_aggregate = channel.aggregate
-        channel.update()
-        if channel.aggregate != old_aggregate:
-            print(channel.aggregate)
-
+        aggregate = client.fetch_channel_aggregate(agent_id, channel_name)
+        new_aggregate = aggregate.to_dict()
+        if new_aggregate != old_aggregate:
+            old_aggregate = new_aggregate
+            if state.json:
+                print(json.dumps(new_aggregate, indent=4))
+            else:
+                print(json.dumps(aggregate.data, indent=4))
         time.sleep(poll_rate)
 
 
@@ -300,14 +277,8 @@ def subscribe(
     _agent: AgentAnnotation = None,
 ):
     """Add a channel to a task's subscriptions."""
-    task = state.api.get_channel_named(task_name, state.agent_id)
-    if not isinstance(task, Task):
-        print("That wasn't a task channel. Try again?")
-        return
-
-    channel = state.api.get_channel_named(channel_name, state.agent_id)
-    task.subscribe_to_channel(channel.id)
-    print(f"Successfully added {channel_name} to {task.name}'s subscriptions.")
+    _ = (task_name, channel_name, _profile, _agent)
+    exit_for_unsupported_control_command("channel.subscribe")
 
 
 @app.command()
@@ -324,12 +295,6 @@ def unsubscribe(
     _profile: ProfileAnnotation = None,
     _agent: AgentAnnotation = None,
 ):
-    """Remove a channel to a task's subscriptions."""
-    task = state.api.get_channel_named(task_name, state.agent_id)
-    if not isinstance(task, Task):
-        print("That wasn't a task channel. Try again?")
-        return
-
-    channel = state.api.get_channel_named(channel_name, state.agent_id)
-    task.unsubscribe_from_channel(channel.id)
-    print(f"Successfully removed {channel_name} from {task.name}'s subscriptions.")
+    """Remove a channel from a task's subscriptions."""
+    _ = (task_name, channel_name, _profile, _agent)
+    exit_for_unsupported_control_command("channel.unsubscribe")
