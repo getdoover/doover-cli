@@ -51,6 +51,8 @@ class FakeAppConfig:
         self.image_name = image_name
         self.type = "DEV"
         self.staging_config = {}
+        self.widget_path = None
+        self.build_widget_command = None
         self.save_calls = 0
         self._payload = {
             "id": app_id,
@@ -446,6 +448,10 @@ def test_app_publish_updates_existing_application(monkeypatch, tmp_path):
         ),
     )
     monkeypatch.setattr(
+        "doover_cli.apps.apps.export_ui_command",
+        lambda ctx, app_fp, validate_: None,
+    )
+    monkeypatch.setattr(
         "doover_cli.apps.apps._build_container",
         lambda root_fp, **kwargs: captured.setdefault("build", (root_fp, kwargs)),
     )
@@ -516,6 +522,10 @@ def test_app_publish_creates_then_updates_when_missing(monkeypatch, tmp_path):
         lambda ctx, app_fp, validate_: None,
     )
     monkeypatch.setattr(
+        "doover_cli.apps.apps.export_ui_command",
+        lambda ctx, app_fp, validate_: None,
+    )
+    monkeypatch.setattr(
         "doover_cli.apps.apps._build_container", lambda *args, **kwargs: None
     )
     monkeypatch.setattr("doover_cli.apps.apps._push_container", lambda image_name: None)
@@ -569,6 +579,10 @@ def test_app_publish_skip_container_avoids_build_and_push(monkeypatch, tmp_path)
         lambda ctx, app_fp, validate_: None,
     )
     monkeypatch.setattr(
+        "doover_cli.apps.apps.export_ui_command",
+        lambda ctx, app_fp, validate_: None,
+    )
+    monkeypatch.setattr(
         "doover_cli.apps.apps._build_container",
         lambda *args, **kwargs: captured.setdefault("build_called", True),
     )
@@ -604,6 +618,10 @@ def test_app_publish_rejects_fix_me_values(monkeypatch, tmp_path):
         "doover_cli.apps.apps.export_config_command",
         lambda ctx, app_fp, validate_: None,
     )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_ui_command",
+        lambda ctx, app_fp, validate_: None,
+    )
 
     result = runner.invoke(app, ["app", "publish", str(tmp_path), "--skip-container"])
 
@@ -636,6 +654,10 @@ def test_app_publish_honours_explicit_staging(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         "doover_cli.apps.apps.export_config_command",
+        lambda ctx, app_fp, validate_: None,
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_ui_command",
         lambda ctx, app_fp, validate_: None,
     )
 
@@ -678,6 +700,10 @@ def test_app_publish_infers_staging_from_control_url(monkeypatch, tmp_path):
         lambda ctx, app_fp, validate_: None,
     )
     monkeypatch.setattr(
+        "doover_cli.apps.apps.export_ui_command",
+        lambda ctx, app_fp, validate_: None,
+    )
+    monkeypatch.setattr(
         "doover_cli.apps.apps._control_base_url",
         lambda: "https://api.staging.udoover.com",
     )
@@ -715,6 +741,10 @@ def test_app_publish_skips_build_when_requested_by_config(monkeypatch, tmp_path)
     )
     monkeypatch.setattr(
         "doover_cli.apps.apps.export_config_command",
+        lambda ctx, app_fp, validate_: None,
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_ui_command",
         lambda ctx, app_fp, validate_: None,
     )
     monkeypatch.setattr(
@@ -775,6 +805,10 @@ def test_app_publish_processor_builds_package_and_releases_version(
     )
     monkeypatch.setattr(
         "doover_cli.apps.apps.export_config_command",
+        lambda ctx, app_fp, validate_: None,
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_ui_command",
         lambda ctx, app_fp, validate_: None,
     )
     monkeypatch.setattr(
