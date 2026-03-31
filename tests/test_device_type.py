@@ -1,3 +1,4 @@
+import re
 from contextlib import nullcontext
 from types import SimpleNamespace
 
@@ -10,6 +11,12 @@ from doover_cli.utils import crud
 from doover_cli.utils.crud import LookupChoice
 
 runner = CliRunner()
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text)
 
 
 class FakeRenderer:
@@ -364,10 +371,11 @@ def test_device_type_create_help_lists_generated_options():
     result = runner.invoke(app, ["device-type", "create", "--help"])
 
     assert result.exit_code == 0
-    assert "--name" in result.stdout
-    assert "--solution-id" in result.stdout
-    assert "--config-schema" in result.stdout
-    assert "--installer" in result.stdout
+    output = _strip_ansi(result.stdout)
+    assert "--name" in output
+    assert "--solution-id" in output
+    assert "--config-schema" in output
+    assert "--installer" in output
 
 
 def test_device_type_update_with_options_patches_payload(monkeypatch):

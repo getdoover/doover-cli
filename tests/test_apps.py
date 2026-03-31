@@ -1,3 +1,4 @@
+import re
 from contextlib import nullcontext
 from types import SimpleNamespace
 
@@ -7,6 +8,12 @@ from doover_cli import app
 from doover_cli.apps import apps as apps_app
 
 runner = CliRunner()
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text)
 
 
 class FakeRenderer:
@@ -278,9 +285,10 @@ def test_app_update_help_lists_generated_options():
     result = runner.invoke(app, ["app", "update", "--help"])
 
     assert result.exit_code == 0
-    assert "--display-name" in result.stdout
-    assert "--organisation-id" in result.stdout
-    assert "--container-registry-profile-" in result.stdout
+    output = _strip_ansi(result.stdout)
+    assert "--display-name" in output
+    assert "--organisation-id" in output
+    assert "--container-registry-profile-" in output
 
 
 def test_app_update_with_options_patches_payload(monkeypatch):

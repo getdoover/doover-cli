@@ -1,3 +1,4 @@
+import re
 from contextlib import nullcontext
 
 from typer.testing import CliRunner
@@ -5,6 +6,12 @@ from typer.testing import CliRunner
 from doover_cli import app
 
 runner = CliRunner()
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text)
 
 
 class FakeRenderer:
@@ -46,9 +53,9 @@ def test_device_type_generated_help_routes_through_root_cli():
     update_result = runner.invoke(app, ["device-type", "update", "--help"])
 
     assert create_result.exit_code == 0
-    assert "--name" in create_result.stdout
+    assert "--name" in _strip_ansi(create_result.stdout)
     assert update_result.exit_code == 0
-    assert "Device type ID to update." in update_result.stdout
+    assert "Device type ID to update." in _strip_ansi(update_result.stdout)
 
 
 def test_device_type_list_happy_path_runs_through_root_app(monkeypatch):
