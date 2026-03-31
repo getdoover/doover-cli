@@ -7,7 +7,7 @@ from rich import print
 from .sentry import capture_handled_exception
 
 
-def run(command, cwd: Path = None):
+def run(command, cwd: Path | None = None):
     """Run a shell command and return the output."""
 
     print(f"[bold green]Running command: [/bold green]{command}")

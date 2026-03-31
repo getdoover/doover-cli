@@ -1,34 +1,55 @@
 import os
-import re
-
-from datetime import datetime, timezone
 from typing import Annotated
 
-from pydoover.cloud.api import Client
-from pydoover.cloud.api import ConfigManager
+import typer
+from pydoover.api.auth import ConfigManager
 from typer import Option
 
-from .misc import choose
+from doover_cli.api import ControlClientUnavailableError, DooverCLISession
 
-KEY_MATCH = re.compile(r"[0-9a-z]{8}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{12}")
+
+def setup_session(
+    profile_name: str,
+    config_manager: ConfigManager | None = None,
+) -> DooverCLISession:
+    if os.environ.get("DOOVER_API_TOKEN"):
+        return DooverCLISession.from_env()
+
+    manager = config_manager or ConfigManager(profile_name)
+    manager.current_profile = profile_name
+    return DooverCLISession.from_profile(profile_name, config_manager=manager)
 
 
 def profile_callback(value: str | None):
     from .state import state
 
-    state.config_manager.current_profile = value or "default"
-    return value
+    profile_name = value or "default"
+    state.profile_name = profile_name
+    state._session = None
+    if state.config_manager is not None:
+        state.config_manager.current_profile = profile_name
+    return profile_name
 
 
 def agent_callback(value: str | None):
     from .state import state
 
-    state.agent_query = value
+    if value is None:
+        state.agent_id = None
+        return value
+
+    try:
+        state.agent_id = int(value)
+    except ValueError as exc:
+        raise typer.BadParameter(
+            "Please provide --agent with an integer Doover agent ID.",
+            param_hint="--agent",
+        ) from exc
     return value
 
 
 ProfileAnnotation = Annotated[
-    str,
+    str | None,
     Option(
         "--profile",
         help="Config profile to use for this request.",
@@ -36,117 +57,25 @@ ProfileAnnotation = Annotated[
     ),
 ]
 AgentAnnotation = Annotated[
-    str,
+    str | None,
     Option(
         "--agent",
-        help="Agent ID or name to use for this request.",
+        help="Doover agent ID to use for this request.",
         callback=agent_callback,
     ),
 ]
 
 
-def on_api_login(api: Client, config_manager: ConfigManager):
-    config = config_manager.current
-
-    config.agent_id = api.agent_id
-    config.token = api.access_token.token
-    config.token_expires = api.access_token.expires_at
-
-    config_manager.write()
-
-
-def setup_api(agent_id: str, config_manager: ConfigManager, read: bool = True):
-    env_token = os.environ.get("DOOVER_API_TOKEN")
-    if env_token:
-        # shortcut for using an environment variable, e.g. in CI/CD pipelines
-        api = Client(
-            token=env_token,
-            base_url=os.environ.get("DOOVER_API_BASE_URL", "https://my.doover.com"),
-            agent_id=agent_id,
-        )
-        return api, resolve_agent_query(agent_id, api)
-
-    if read:
-        config_manager.read()
-
-    config = config_manager.current
-    if not config:
-        raise RuntimeError(
-            f"No configuration found for profile {config_manager.current_profile}. "
-            f"Please use a different profile or run `doover login`"
-        )
-
-    if agent_id is None:
-        agent_id = config.agent_id
-
-    api: Client = Client(
-        config.username,
-        config.password,
-        config.token,
-        config.token_expires,
-        config.base_url,
-        agent_id,
-        login_callback=lambda: on_api_login(api, config_manager),
-        refresh_token=config.refresh_token,
-        refresh_token_id=config.refresh_token_id,
-        data_base_url=config.base_data_url,
-        auth_server_url=config.auth_server_url,
-        auth_server_client_id=config.auth_server_client_id,
-        is_doover2=config.is_doover2,
-    )
-
-    if config.token is None or (
-        config.token_expires and config.token_expires < datetime.now(timezone.utc)
-    ):
-        api.login()
-
-    return api, resolve_agent_query(agent_id, api)
-
-
-def resolve_agent_query(agent_query: str, api: Client):
-    if agent_query is None:
-        return None
-
-    id_match = KEY_MATCH.search(agent_query)
-    if id_match:
-        return api.get_agent(id_match.group(0))
-
+def exit_for_unsupported_control_command(command_name: str) -> None:
     try:
-        id_match = int(agent_query)
-    except ValueError:
-        pass
-    else:
-        return id_match
-        return api.get_agent(id_match)
+        raise ControlClientUnavailableError(command_name)
+    except ControlClientUnavailableError as exc:
+        from .sentry import capture_handled_exception
 
-    try:
-        from fuzzywuzzy import process
-    except ImportError:
-        print(
-            "Tried to use fuzzy matching without fuzzywuzzy installed. "
-            "Please pass an agent ID, or install the extra packages."
+        print(exc)
+        capture_handled_exception(
+            exc,
+            command=command_name,
+            message=str(exc),
         )
-        return
-
-    print("Fetching agents...")
-    agents = {a.name: a for a in api.get_agent_list()}
-    matches = process.extractBests(agent_query, agents.keys(), limit=5, score_cutoff=65)
-    if len(matches) == 0:
-        print(
-            f"Could not resolve agent query: {agent_query}. Using default user agent ID."
-        )
-        return
-
-    if len(matches) == 1 or len([m for m in matches if m[1] == 100]):
-        agent_name, score = matches[0]
-        # quick route, no menu required
-        print(
-            f"Using agent {agent_name} for API calls. (Query: {agent_query}, Score: {score}%)"
-        )
-        return agents[agent_name]
-
-    options = [f"{m[0]} (Match: {m[1]}%)" for m in matches]
-    selected = choose("Multiple agents found. Please select one:", options)
-    agent_name = re.search(r"(.*) \(Match: \d+%\)", selected).group(1)
-    print(f"Using agent {agent_name} for API calls. (Query: {agent_query})")
-    return agents[agent_name]
+        raise typer.Exit(1) from exc

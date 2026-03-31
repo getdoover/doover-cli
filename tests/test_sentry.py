@@ -4,11 +4,11 @@ from types import SimpleNamespace
 
 import click
 import pytest
-from pydoover.cloud.api import Forbidden
 from typer.testing import CliRunner
 
 import doover_cli
 from doover_cli import app
+from doover_cli.api import DooverCLISession
 from doover_cli.utils import sentry as sentry_utils
 from doover_cli.utils.shell_commands import run as shell_run
 from doover_cli.utils.state import state
@@ -21,13 +21,23 @@ class FakeConfigManager:
         self.current_profile = profile
         self.current = SimpleNamespace(
             token="token",
+            token_expires=None,
             base_url="https://my.doover.com",
+            control_base_url="https://api.doover.com",
+            data_base_url="https://data.doover.com/api",
+            refresh_token="refresh-token",
+            refresh_token_id="refresh-token-id",
+            auth_server_url="https://auth.doover.com",
+            auth_server_client_id="client-id",
         )
-        self.entries = {}
+        self.entries = {profile: self.current}
 
     def create(self, entry):
-        self.entries[self.current_profile] = entry
+        self.entries[entry.profile] = entry
         self.current = entry
+
+    def get(self, profile):
+        return self.entries.get(profile)
 
     def read(self):
         return None
@@ -43,13 +53,12 @@ def reset_state(monkeypatch):
     monkeypatch.delenv("DOOVER_SENTRY_ENVIRONMENT", raising=False)
     monkeypatch.setattr(sentry_utils, "_initialized", False)
 
-    state.agent_query = None
     state.agent_id = None
-    state.agent = None
+    state.profile_name = "default"
     state.debug = False
     state.json = False
     state.config_manager = None
-    state._api = None
+    state._session = None
 
 
 def test_init_sentry_disabled(monkeypatch):
@@ -123,7 +132,9 @@ def test_main_captures_unhandled_exception_and_flushes(monkeypatch):
     capture_calls = []
     flush_calls = []
 
-    monkeypatch.setattr(doover_cli.sentry_utils, "init_sentry", lambda: init_calls.append(True))
+    monkeypatch.setattr(
+        doover_cli.sentry_utils, "init_sentry", lambda: init_calls.append(True)
+    )
     monkeypatch.setattr(
         doover_cli.sentry_utils,
         "current_command_path",
@@ -217,7 +228,7 @@ def test_login_reports_handled_exception(monkeypatch):
 
     monkeypatch.setattr(doover_cli, "ConfigManager", FakeConfigManager)
     monkeypatch.setattr(
-        "doover_cli.login.setup_api",
+        "doover_cli.login.DooverCLIAuthClient.device_login",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("nope")),
     )
     monkeypatch.setattr(
@@ -225,62 +236,64 @@ def test_login_reports_handled_exception(monkeypatch):
         lambda exc, **kwargs: capture_calls.append((exc, kwargs)),
     )
 
-    result = runner.invoke(
-        app,
-        [
-            "login",
-            "--username",
-            "user@example.com",
-            "--password",
-            "secret",
-            "--base-url",
-            "https://my.doover.com",
-            "--profile-name",
-            "default",
-        ],
-    )
+    result = runner.invoke(app, ["login"])
 
     assert result.exit_code == 1
     assert len(capture_calls) == 1
     assert capture_calls[0][1]["command"] == "login"
 
 
-def test_configure_token_reports_handled_exception(monkeypatch):
-    capture_calls = []
+def test_login_persists_selected_profile(monkeypatch):
+    class FakeAuth:
+        def __init__(self):
+            self.persist_calls = []
 
-    class DummyApi:
-        def get_agent(self, agent_id):
-            raise Forbidden()
+        def persist_profile(self, profile_name, config_manager):
+            self.persist_calls.append((profile_name, config_manager))
+
+    fake_auth = FakeAuth()
 
     monkeypatch.setattr(doover_cli, "ConfigManager", FakeConfigManager)
-    monkeypatch.setattr("doover_cli.login.setup_api", lambda *args, **kwargs: None)
     monkeypatch.setattr(
-        "doover_cli.login.capture_handled_exception",
+        "doover_cli.login.DooverCLIAuthClient.device_login",
+        lambda *args, **kwargs: fake_auth,
+    )
+
+    result = runner.invoke(app, ["login", "--staging"])
+
+    assert result.exit_code == 0
+    assert fake_auth.persist_calls[0][0] == "staging"
+
+
+def test_removed_configure_token_command():
+    result = runner.invoke(app, ["configure-token"])
+
+    assert result.exit_code != 0
+    assert "No such command" in result.output
+
+
+def test_unsupported_control_command_reports_handled_exception(monkeypatch):
+    capture_calls = []
+
+    monkeypatch.setattr(
+        "doover_cli.utils.sentry.capture_handled_exception",
         lambda exc, **kwargs: capture_calls.append((exc, kwargs)),
     )
-    state.agent_id = "agent-1"
-    state._api = DummyApi()
 
-    result = runner.invoke(
-        app,
-        [
-            "configure-token",
-            "--token",
-            "token",
-            "--agent-id",
-            "agent-1",
-            "--base-url",
-            "https://my.doover.com",
-            "--profile",
-            "default",
-            "--expiry",
-            "1",
-        ],
-    )
+    result = runner.invoke(app, ["agent", "list"])
 
     assert result.exit_code == 1
+    assert "requires pydoover.api.control" in result.stdout
     assert len(capture_calls) == 1
-    assert capture_calls[0][1]["command"] == "login.configure_token"
+    assert capture_calls[0][1]["command"] == "agent.list"
+
+
+def test_env_session_requires_data_api_base_url(monkeypatch):
+    monkeypatch.setenv("DOOVER_API_TOKEN", "token")
+    monkeypatch.delenv("DOOVER_DATA_API_BASE_URL", raising=False)
+
+    with pytest.raises(RuntimeError, match="DOOVER_DATA_API_BASE_URL"):
+        DooverCLISession.from_env()
 
 
 def test_report_compose_reports_handled_exception(monkeypatch):

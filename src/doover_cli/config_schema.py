@@ -26,7 +26,7 @@ def export(
         ),
     ] = True,
     config_fp: Annotated[
-        Path,
+        Path | None,
         typer.Option(
             help="Path to the configuration file to export to.",
             exists=False,
@@ -106,7 +106,7 @@ def validate(
 def generate(
     ctx: typer.Context,
     output_fp: Annotated[
-        Path, typer.Argument(help="Path to the output directory.")
+        Path | None, typer.Argument(help="Path to the output directory.")
     ] = None,
     app_fp: Annotated[
         Path, typer.Argument(help="Path to the application directory.")
