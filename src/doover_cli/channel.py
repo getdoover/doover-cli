@@ -161,7 +161,7 @@ def publish(
             agent_id,
             channel_name,
             data=payload,
-            replace=False,
+            replace_data=False,
             log_update=True,
         )
     except NotFoundError as exc:
@@ -202,7 +202,7 @@ def publish_file(
             agent_id,
             channel_name,
             data={"output_type": attachment.content_type},
-            replace=True,
+            replace_data=True,
             files=[attachment],
             log_update=True,
         )
