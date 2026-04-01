@@ -336,14 +336,10 @@ def get_docker_path() -> Path:
     return Path(docker_path)
 
 
-_app_config_cache: dict[Path, "LocalApplication"] = {}
+_selected_app_name: dict[Path, str] = {}
 
 
-def get_app_config(root_fp: Path) -> Any:
-    resolved = root_fp.resolve()
-    if resolved in _app_config_cache:
-        return _app_config_cache[resolved]
-
+def get_app_config(root_fp: Path, app_name: str | None = None) -> Any:
     config_path = root_fp / "doover_config.json"
     if not config_path.exists():
         print(f"Configuration file not found at {config_path}.")
@@ -365,14 +361,19 @@ def get_app_config(root_fp: Path) -> Any:
         )
         raise typer.Exit(1)
     elif len(result) == 1:
-        _app_config_cache[resolved] = result[0]
         return result[0]
-    elif len(result) > 1:
-        lookup = {r.name: r for r in result}
-        choice = questionary.select(
-            "Multiple application configurations found. Please select one:",
-            choices=list(lookup.keys()),
-        ).ask()
-        selected = lookup[choice]
-        _app_config_cache[resolved] = selected
-        return selected
+
+    lookup = {r.name: r for r in result}
+
+    # Use explicit app_name, then cached selection, then prompt.
+    resolved = root_fp.resolve()
+    name = app_name or _selected_app_name.get(resolved)
+    if name and name in lookup:
+        return lookup[name]
+
+    choice = questionary.select(
+        "Multiple application configurations found. Please select one:",
+        choices=list(lookup.keys()),
+    ).ask()
+    _selected_app_name[resolved] = choice
+    return lookup[choice]

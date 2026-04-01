@@ -716,6 +716,12 @@ def put_widget(
             help="Path to the widget file. Defaults to the widget path in doover_config.json."
         ),
     ] = None,
+    app_name: Annotated[
+        str | None,
+        typer.Option(
+            help="Application name in doover_config.json. Avoids prompting when multiple apps exist.",
+        ),
+    ] = None,
     staging: Annotated[
         bool | None,
         typer.Option(
@@ -727,7 +733,7 @@ def put_widget(
     """Upload a widget file for an application."""
     _ = _profile
     root_fp = get_app_directory(app_fp)
-    app_config = get_app_config(root_fp)
+    app_config = get_app_config(root_fp, app_name=app_name)
     client, renderer = get_state()
 
     resolved_staging = _resolve_staging(staging)
@@ -764,13 +770,19 @@ def build_widget(
     app_fp: Annotated[
         Path, typer.Argument(help="Path to the application directory.")
     ] = Path(),
+    app_name: Annotated[
+        str | None,
+        typer.Option(
+            help="Application name in doover_config.json. Avoids prompting when multiple apps exist.",
+        ),
+    ] = None,
 ):
     """Build the widget for an application.
 
     Runs the build_widget_command from doover_config.json, or defaults to `npm run build`.
     """
     root_fp = get_app_directory(app_fp)
-    app_config = get_app_config(root_fp)
+    app_config = get_app_config(root_fp, app_name=app_name)
     command = app_config.build_widget_command or "npm run build"
     shell_run(command, cwd=root_fp)
 
@@ -901,6 +913,12 @@ def publish(
             help="Upload the widget when publishing. Disable with --no-put-widget.",
         ),
     ] = True,
+    app_name: Annotated[
+        str | None,
+        typer.Option(
+            help="Application name in doover_config.json. Avoids prompting when multiple apps exist.",
+        ),
+    ] = None,
     buildx: Annotated[
         bool,
         typer.Option(
@@ -915,6 +933,9 @@ def publish(
     """
     _ = _profile
     root_fp = get_app_directory(app_fp)
+
+    # Resolve the app name early so subsequent get_app_config calls don't re-prompt.
+    _ = get_app_config(root_fp, app_name=app_name)
 
     if export_config:
         try:
