@@ -29,6 +29,10 @@ def export(
     root_fp = get_app_directory(app_fp)
     app_config = get_app_config(root_fp)
     export_command = app_config.export_ui_command or "export-ui"
+    if export_command == "NO_EXPORT":
+        print("App requested no ui export. Skipping...")
+        return
+
     call_with_uv(
         export_command,
         in_shell=True,
