@@ -57,6 +57,7 @@ class LocalApplication(ControlApplication):
         run_command: str | None = None,
         staging_config: dict[str, Any] | None = None,
         base_path: Path | None = None,
+        deployment_folder: str | None = None,
     ) -> None:
         super().__init__(
             id=id,
@@ -113,6 +114,7 @@ class LocalApplication(ControlApplication):
         self.run_command = run_command
         self.staging_config = staging_config or {}
         self.base_path = base_path
+        self.deployment_folder = deployment_folder or "deployment"
 
     @property
     def src_directory(self) -> Path:
@@ -129,7 +131,7 @@ class LocalApplication(ControlApplication):
         return keys
 
     def _deployment_data(self) -> str | None:
-        deployment_fp = (self.base_path or Path()) / "deployment"
+        deployment_fp = (self.base_path or Path()) / self.deployment_folder
         if not deployment_fp.exists():
             return None
 
@@ -173,6 +175,7 @@ class LocalApplication(ControlApplication):
             icon_url=data.get("icon_url"),
             banner_url=data.get("banner_url"),
             base_path=app_base,
+            deployment_folder=data.get("deployment_folder"),
         )
 
     def to_request_payload(
@@ -227,6 +230,9 @@ class LocalApplication(ControlApplication):
 
         if self._widget_raw is not None:
             data["widget"] = self._widget_raw
+
+        if self.deployment_folder != "deployment":
+            data["deployment_folder"] = self.deployment_folder
 
         if include_deployment_data is False:
             data["staging_config"] = self.staging_config

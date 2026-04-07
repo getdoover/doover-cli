@@ -76,6 +76,57 @@ def test_local_application_save_to_disk_persists_local_fields(tmp_path):
     assert saved["staging_config"] == {"id": 404}
 
 
+def test_local_application_custom_deployment_folder(tmp_path):
+    deployment_dir = tmp_path / "my_deploy"
+    deployment_dir.mkdir()
+    (deployment_dir / "artifact.txt").write_text("payload")
+
+    app_config = LocalApplication(
+        id=101,
+        name="tracker-app",
+        display_name="Tracker App",
+        description="A tracker app",
+        type="DEV",
+        visibility="PRI",
+        depends_on=[],
+        organisation=17,
+        container_registry_profile=22,
+        image_name="ghcr.io/getdoover/tracker-app:main",
+        config_schema={"type": "object"},
+        base_path=tmp_path,
+        deployment_folder="my_deploy",
+    )
+
+    payload = app_config.to_request_payload(include_deployment_data=True)
+    assert isinstance(payload["deployment_data"], str)
+    assert payload["deployment_data"]
+
+    # Verify it persists in config dict
+    config = app_config.to_config_dict()
+    assert config["deployment_folder"] == "my_deploy"
+
+
+def test_local_application_default_deployment_folder_not_in_config(tmp_path):
+    app_config = LocalApplication(
+        id=101,
+        name="tracker-app",
+        display_name="Tracker App",
+        description="A tracker app",
+        type="DEV",
+        visibility="PRI",
+        depends_on=[],
+        organisation=17,
+        container_registry_profile=22,
+        image_name="ghcr.io/getdoover/tracker-app:main",
+        config_schema={"type": "object"},
+        base_path=tmp_path,
+    )
+
+    # Default "deployment" folder name should not appear in config
+    config = app_config.to_config_dict()
+    assert "deployment_folder" not in config
+
+
 def test_local_application_to_request_payload_uses_control_shape(tmp_path):
     deployment_dir = tmp_path / "deployment"
     deployment_dir.mkdir()
