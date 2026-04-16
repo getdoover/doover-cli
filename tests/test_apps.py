@@ -472,7 +472,7 @@ def test_app_publish_updates_existing_application(monkeypatch, tmp_path):
         lambda message, abort=True: captured.setdefault("confirm", message) or True,
     )
 
-    result = runner.invoke(app, ["app", "publish", str(tmp_path)])
+    result = runner.invoke(app, ["app", "publish", str(tmp_path), "--build-container"])
 
     assert result.exit_code == 0
     assert captured["exported"] == (tmp_path, True)
@@ -488,7 +488,6 @@ def test_app_publish_updates_existing_application(monkeypatch, tmp_path):
     assert captured["partial"][0] == "101"
     assert captured["partial"][1]["organisation_id"] == 17
     assert captured["partial"][1]["container_registry_profile_id"] == 22
-    assert "build ghcr.io/getdoover/tracker-app:main" in captured["confirm"]
     assert renderer.render_calls == [{"id": 101, "published": True}]
 
 
@@ -559,7 +558,7 @@ def test_app_publish_creates_then_updates_when_missing(monkeypatch, tmp_path):
     assert renderer.render_calls == [{"id": 202}]
 
 
-def test_app_publish_skip_container_avoids_build_and_push(monkeypatch, tmp_path):
+def test_app_publish_default_skips_container_build(monkeypatch, tmp_path):
     captured = {}
     renderer = FakeRenderer()
     app_config = FakeAppConfig(app_id=101)
@@ -599,7 +598,7 @@ def test_app_publish_skip_container_avoids_build_and_push(monkeypatch, tmp_path)
         lambda *args, **kwargs: captured.setdefault("push_called", True),
     )
 
-    result = runner.invoke(app, ["app", "publish", str(tmp_path), "--skip-container"])
+    result = runner.invoke(app, ["app", "publish", str(tmp_path)])
 
     assert result.exit_code == 0
     assert "build_called" not in captured
@@ -631,7 +630,7 @@ def test_app_publish_rejects_fix_me_values(monkeypatch, tmp_path):
         lambda ctx, app_fp, validate_: None,
     )
 
-    result = runner.invoke(app, ["app", "publish", str(tmp_path), "--skip-container"])
+    result = runner.invoke(app, ["app", "publish", str(tmp_path)])
 
     assert result.exit_code == 2
 
@@ -670,7 +669,7 @@ def test_app_publish_honours_explicit_staging(monkeypatch, tmp_path):
     )
 
     result = runner.invoke(
-        app, ["app", "publish", str(tmp_path), "--skip-container", "--staging"]
+        app, ["app", "publish", str(tmp_path), "--staging"]
     )
 
     assert result.exit_code == 0
@@ -716,7 +715,7 @@ def test_app_publish_infers_staging_from_control_url(monkeypatch, tmp_path):
         lambda: "https://api.staging.udoover.com",
     )
 
-    result = runner.invoke(app, ["app", "publish", str(tmp_path), "--skip-container"])
+    result = runner.invoke(app, ["app", "publish", str(tmp_path)])
 
     assert result.exit_code == 0
     assert captured["body"]["deployment_data"] == "staging-data"
@@ -764,7 +763,7 @@ def test_app_publish_skips_build_when_requested_by_config(monkeypatch, tmp_path)
         lambda *args, **kwargs: captured.setdefault("push_called", True),
     )
 
-    result = runner.invoke(app, ["app", "publish", str(tmp_path)])
+    result = runner.invoke(app, ["app", "publish", str(tmp_path), "--build-container"])
 
     assert result.exit_code == 0
     assert "build_called" not in captured
