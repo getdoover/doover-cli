@@ -877,10 +877,10 @@ def publish(
     app_fp: Annotated[
         Path, typer.Argument(help="Path to the application directory.")
     ] = Path(),
-    skip_container: Annotated[
+    build_container: Annotated[
         bool,
         typer.Option(
-            help="Whether to build and push the container image. Defaults to building and pushing."
+            help="Build and push the container image to the registry."
         ),
     ] = False,
     staging: Annotated[
@@ -1030,18 +1030,6 @@ def publish(
                 )
             rich.print("[green]Widget uploaded.[/green]")
 
-    if getattr(app_config, "build_args", None) == "NO_BUILD":
-        print("App requested to not build. Skipping build step.")
-        print("Done!")
-        renderer.render(response)
-        raise typer.Exit(0)
-
-    if skip_container is True:
-        print("User requested to skip container build and push. Skipping...")
-        print("Done!")
-        renderer.render(response)
-        raise typer.Exit(0)
-
     if app_config.type in ("PRO", "REP", "INT"):
         print("\nBuilding package.zip for upload...")
         shell_run("./build.sh", cwd=root_fp)
@@ -1062,20 +1050,20 @@ def publish(
         renderer.render(version_response or processor_response or response)
         raise typer.Exit(0)
 
-    print("\nApp updated. Now pushing the image to the registry...\n")
-    image_name = _require_publish_value("image_name", payload.get("image_name"))
-    typer.confirm(
-        f"Do you want to continue? I will build {image_name} and publish it to the registry.",
-        abort=True,
-    )
-    build_args = getattr(app_config, "build_args", "") or ""
-    _build_container(
-        root_fp,
-        buildx=buildx,
-        build_args=build_args,
-        image_name=image_name,
-    )
-    _push_container(image_name)
+    if build_container:
+        image_name = _require_publish_value("image_name", payload.get("image_name"))
+        build_args = getattr(app_config, "build_args", "") or ""
+        if build_args != "NO_BUILD":
+            print("\nBuilding and pushing container image to the registry...")
+            _build_container(
+                root_fp,
+                buildx=buildx,
+                build_args=build_args,
+                image_name=image_name,
+            )
+            _push_container(image_name)
+        else:
+            print("App requested to not build. Skipping build step.")
 
     print("\n\nDone!")
     renderer.render(response)
