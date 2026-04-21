@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 import typer
+from pydoover.models.control import Device, Location
 from pydoover.models.control._base import ControlField, ControlModel
 
 from doover_cli.utils.crud.schema import get_model_field_specs
@@ -127,3 +128,48 @@ def test_build_model_instance_enforces_required_fields():
     )
     assert model.name == "Tracker"
     assert model.count == 3
+
+
+def _device_fixed_location_spec():
+    return next(
+        spec
+        for spec in get_model_field_specs(Device, "POST")
+        if spec.name == "fixed_location"
+    )
+
+
+def test_coerce_cli_value_normalizes_location_json_and_models():
+    spec = _device_fixed_location_spec()
+
+    assert coerce_cli_value(
+        spec,
+        '{"latitude": 1.5, "longitude": 2.5}',
+    ) == {"latitude": 1.5, "longitude": 2.5}
+    assert coerce_cli_value(
+        spec,
+        Location(latitude=3.5, longitude=4.5),
+    ) == {"latitude": 3.5, "longitude": 4.5}
+
+
+def test_coerce_cli_value_rejects_invalid_location_shapes():
+    spec = _device_fixed_location_spec()
+
+    with pytest.raises(typer.BadParameter, match="unsupported keys: lat"):
+        coerce_cli_value(spec, '{"lat": 1, "longitude": 2}')
+
+    with pytest.raises(typer.BadParameter, match="Missing: longitude"):
+        coerce_cli_value(spec, '{"latitude": 1}')
+
+    with pytest.raises(typer.BadParameter, match="numeric latitude values"):
+        coerce_cli_value(spec, '{"latitude": "north", "longitude": 2}')
+
+
+def test_collect_changed_model_values_treats_identical_locations_as_unchanged():
+    changed = collect_changed_model_values(
+        Device,
+        "PATCH",
+        {"fixed_location": Location(latitude=1.0, longitude=2.0)},
+        {"fixed_location": '{"latitude": 1, "longitude": 2}'},
+    )
+
+    assert changed == {}

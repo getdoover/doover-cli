@@ -51,6 +51,8 @@ def resolve_field_kind(
         return "bool"
     if spec.field.type == "json":
         return "json"
+    if spec.field.type == "Location":
+        return "json"
     if spec.field.type == "resource":
         return "resource"
     return "text"

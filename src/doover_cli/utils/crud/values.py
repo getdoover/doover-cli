@@ -11,6 +11,65 @@ from .schema import ModelVersionFieldSpec, get_model_field_specs
 _MISSING = object()
 
 
+def _raise_location_error(spec: ModelVersionFieldSpec, message: str) -> None:
+    raise typer.BadParameter(
+        f"{spec.option_names[0]} {message}",
+        param_hint=spec.option_names[0],
+    )
+
+
+def _coerce_location_number(spec: ModelVersionFieldSpec, key: str, value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        _raise_location_error(spec, f"must use numeric {key} values.")
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return float(stripped)
+        except ValueError as exc:
+            _raise_location_error(spec, f"must use numeric {key} values.")
+    _raise_location_error(spec, f"must use numeric {key} values.")
+
+
+def _normalize_location_value(spec: ModelVersionFieldSpec, raw_value: Any) -> dict[str, float | None]:
+    if isinstance(raw_value, str):
+        raw_value = parsers.maybe_json(raw_value)
+    elif hasattr(raw_value, "latitude") and hasattr(raw_value, "longitude"):
+        raw_value = {
+            "latitude": getattr(raw_value, "latitude"),
+            "longitude": getattr(raw_value, "longitude"),
+        }
+
+    if not isinstance(raw_value, dict):
+        _raise_location_error(
+            spec,
+            'must be a JSON object like {"latitude": 1.23, "longitude": 4.56}.',
+        )
+
+    unsupported_keys = sorted(set(raw_value) - {"latitude", "longitude"})
+    if unsupported_keys:
+        joined_keys = ", ".join(unsupported_keys)
+        _raise_location_error(
+            spec,
+            f"does not accept unsupported keys: {joined_keys}. Use only latitude and longitude.",
+        )
+
+    missing_keys = [key for key in ("latitude", "longitude") if key not in raw_value]
+    if missing_keys:
+        joined_keys = ", ".join(missing_keys)
+        _raise_location_error(spec, f"must include both latitude and longitude. Missing: {joined_keys}.")
+
+    return {
+        "latitude": _coerce_location_number(spec, "latitude", raw_value.get("latitude")),
+        "longitude": _coerce_location_number(spec, "longitude", raw_value.get("longitude")),
+    }
+
+
 def parse_optional_bool(value: str | None, option_name: str) -> bool | None:
     if value is None:
         return None
@@ -31,6 +90,8 @@ def coerce_cli_value(spec: ModelVersionFieldSpec, raw_value: Any) -> Any:
         return None
     if spec.field.type == "json" and isinstance(raw_value, (dict, list)):
         return raw_value
+    if spec.field.type == "Location":
+        return _normalize_location_value(spec, raw_value)
 
     # Resource fields arrive from multiple paths: CLI strings, prompt answers,
     # dict payloads, and hydrated model instances.
