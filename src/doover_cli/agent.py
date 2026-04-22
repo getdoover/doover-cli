@@ -7,7 +7,7 @@ import typer
 from pydoover.models.control import Agent, Agents, Group
 from typer import Typer
 
-from .colours import ARCHIVED_DEVICE_COLOUR, ENTITY_COLOURS
+from .colours import ENTITY_COLOURS
 from .renderer import TreeNode
 from .renderer._base import normalize_render_data
 from .utils.api import ProfileAnnotation
@@ -171,13 +171,12 @@ def _build_group_branch(
 
 def _build_agent_node(agent: Agent) -> TreeNode:
     if _is_device_agent(agent):
+        style = ENTITY_COLOURS["device"]
+        if _field_value(agent, "archived", False):
+            style = "dim " + style
         return TreeNode(
             _format_device_label(agent),
-            style=(
-                ARCHIVED_DEVICE_COLOUR
-                if _field_value(agent, "archived", False)
-                else ENTITY_COLOURS["device"]
-            ),
+            style=style,
         )
 
     label = str(

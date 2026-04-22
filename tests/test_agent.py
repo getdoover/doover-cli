@@ -4,7 +4,6 @@ from typer.testing import CliRunner
 
 from doover_cli import app
 from doover_cli.colours import (
-    ARCHIVED_DEVICE_COLOUR,
     DEVICE_COLOUR,
     GROUP_COLOUR,
     ORGANISATION_COLOUR,
@@ -180,7 +179,7 @@ def test_build_agents_tree_groups_agents_and_preserves_fields():
     solar = field_team.children[0]
     assert solar.label == "Solar Monitor (solar-monitor | 202) device (Archived)"
     assert solar.children == []
-    assert solar.style == ARCHIVED_DEVICE_COLOUR
+    assert solar.style == "dim " + DEVICE_COLOUR
 
 
 def test_build_agents_tree_colours_organisation_fields_for_non_device_agents():

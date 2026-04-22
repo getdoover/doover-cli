@@ -3,10 +3,15 @@ from types import SimpleNamespace
 from rich.console import Console
 from rich.text import Text
 
+from doover_cli.colours import (
+    DEVICE_COLOUR,
+    GROUP_COLOUR,
+    ORGANISATION_COLOUR,
+)
 from doover_cli.renderer._base import TreeNode
 from doover_cli.renderer._default import DefaultRenderer
 from doover_cli.utils.crud import Field, LookupChoice
-from pydoover.models.control import DeviceType, Organisation, Solution
+from pydoover.models.control import Device, DeviceType, Group, Organisation, Solution
 from pydoover.models.control._base import ControlField, ControlModel, ControlPage
 
 
@@ -77,6 +82,66 @@ def test_render_list_omits_columns_that_do_not_fit_terminal_width():
     assert "Omitted: beta" in output
 
 
+def test_render_single_record_shows_every_field_vertically():
+    console = Console(record=True, width=40)
+    renderer = DefaultRenderer(console=console)
+
+    renderer.render(
+        ExampleModel(
+            alpha="A",
+            beta="B",
+            gamma="G",
+            omega="O",
+        )
+    )
+
+    output = console.export_text()
+    # All four fields must appear — no "Showing N of M columns" truncation
+    # like the horizontal list view produces at this width.
+    for field_name in ("gamma", "alpha", "omega", "beta"):
+        assert field_name in output, f"{field_name} missing from detail output"
+    assert "Showing" not in output
+    assert "Omitted" not in output
+
+    # Each field should be on its own line (vertical layout).
+    lines = [line for line in output.splitlines() if line.strip()]
+    gamma_line = next(line for line in lines if "gamma" in line)
+    alpha_line = next(line for line in lines if "alpha" in line)
+    assert "alpha" not in gamma_line
+    assert "gamma" not in alpha_line
+
+    # Field order from _field_defs is preserved top to bottom.
+    order = [lines.index(next(line for line in lines if name in line))
+             for name in ("gamma", "alpha", "omega", "beta")]
+    assert order == sorted(order)
+
+
+def test_render_single_record_pretty_prints_nested_dicts():
+    class WithNested(ControlModel):
+        _model_name = "WithNested"
+        _field_defs = {
+            "id": ControlField(type="string", nullable=True),
+            "config": ControlField(type="json", nullable=True),
+        }
+
+    console = Console(record=True, width=120)
+    renderer = DefaultRenderer(console=console)
+
+    renderer.render(
+        WithNested(
+            id="42",
+            config={"version": "1.2.3", "tier": "prod"},
+        )
+    )
+
+    output = console.export_text()
+    # Pretty-printed JSON uses multiple lines with indentation.
+    assert '"version": "1.2.3"' in output
+    assert '"tier": "prod"' in output
+    # Outer field name has no JSON syntax wrapping it.
+    assert "config" in output
+
+
 def test_render_formats_resource_values_prettily():
     console = Console(record=True, width=120)
     renderer = DefaultRenderer(console=console)
@@ -98,15 +163,66 @@ def test_render_formats_resource_values_prettily():
     assert "Solution:" not in output
 
 
-def test_render_resource_value_uses_bold_blue_text():
+def test_render_resource_value_colours_by_entity_type():
     renderer = DefaultRenderer(console=Console(record=True, width=120))
-    organisation = Organisation(id=1, name="Acme Farms")
 
-    rendered = renderer._render_value(organisation)
+    organisation = renderer._render_value(Organisation(id=1, name="Acme Farms"))
+    group = renderer._render_value(Group(id=2, name="Field Ops"))
+    device = renderer._render_value(Device(id=3, name="Pump", archived=False))
+    archived_device = renderer._render_value(Device(id=4, name="Old Pump", archived=True))
 
-    assert isinstance(rendered, Text)
-    assert rendered.plain == "Acme Farms"
-    assert str(rendered.style) == "bold blue"
+    assert isinstance(organisation, Text)
+    assert str(organisation.style) == ORGANISATION_COLOUR
+    assert str(group.style) == GROUP_COLOUR
+    assert str(device.style) == DEVICE_COLOUR
+    assert str(archived_device.style) == "dim " + DEVICE_COLOUR
+
+
+def test_render_detail_colours_raw_values_by_field_key():
+    class MixedRecord(ControlModel):
+        _model_name = "MixedRecord"
+        _field_defs = {
+            "id": ControlField(type="string", nullable=True),
+            "organisation": ControlField(type="string", nullable=True),
+            "group": ControlField(type="string", nullable=True),
+            "device": ControlField(type="string", nullable=True),
+            "application": ControlField(type="string", nullable=True),
+        }
+
+    renderer = DefaultRenderer(console=Console(record=True, width=120))
+    record = MixedRecord(
+        id="42",
+        organisation="Acme",
+        group="Field Ops",
+        device="Pump-01",
+        application="Platform Interface",
+    )
+
+    # id (not an entity) — no colouring
+    assert renderer._render_detail_value("42", key="id") == "42"
+    # application (not in ENTITY_COLOURS) — no colouring
+    assert renderer._render_detail_value("Platform Interface", key="application") == (
+        "Platform Interface"
+    )
+
+    # Entity-keyed fields — styled per colours.py
+    org_value = renderer._render_detail_value("Acme", key="organisation")
+    group_value = renderer._render_detail_value("Field Ops", key="group")
+    device_value = renderer._render_detail_value("Pump-01", key="device")
+
+    assert isinstance(org_value, Text)
+    assert str(org_value.style) == ORGANISATION_COLOUR
+    assert str(group_value.style) == GROUP_COLOUR
+    assert str(device_value.style) == DEVICE_COLOUR
+
+    # End-to-end: render the record and verify styles are applied in output.
+    console = Console(record=True, width=120, force_terminal=True)
+    DefaultRenderer(console=console).render(record)
+    ansi = console.export_text(styles=True)
+    # Rich uses SGR 33 for yellow, 31 for red, 32 for green
+    assert "\x1b[33m" in ansi  # organisation
+    assert "\x1b[31m" in ansi  # group
+    assert "\x1b[32m" in ansi  # device
 
 
 def test_tree_renders_rich_tree():
