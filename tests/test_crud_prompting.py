@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 import pytest
-from pydoover.models.control import Solution
+from pydoover.models.control import Device, Solution
 from pydoover.models.control._base import ControlField, ControlModel
 
 from doover_cli.utils.crud.lookup import LookupChoice
@@ -68,10 +68,25 @@ class FakeControlClient:
         )
 
 
+class FailingChoiceControlClient:
+    def get_control_methods(self, model_cls):
+        assert model_cls is Solution
+        return SimpleNamespace(
+            list=lambda **kwargs: (_ for _ in ()).throw(
+                ValueError("bad nested API data")
+            )
+        )
+
+
 def test_humanize_helpers_and_field_kind_resolution():
     specs = {
         spec.name: spec for spec in get_model_field_specs(ExamplePromptModel, "POST")
     }
+    device_fixed_location_spec = next(
+        spec
+        for spec in get_model_field_specs(Device, "POST")
+        if spec.name == "fixed_location"
+    )
 
     assert humanize_field_name("solution_id") == "Solution id"
     assert humanize_model_name("DeviceType") == "device type"
@@ -80,6 +95,7 @@ def test_humanize_helpers_and_field_kind_resolution():
     assert resolve_field_kind(specs["enabled"]) == "bool"
     assert resolve_field_kind(specs["config"]) == "json"
     assert resolve_field_kind(specs["installer"]) == "path"
+    assert resolve_field_kind(device_fixed_location_spec) == "json"
 
 
 def test_build_prompt_field_for_spec_sets_installer_and_resource_details():
@@ -104,6 +120,23 @@ def test_build_prompt_field_for_spec_sets_installer_and_resource_details():
             field_values={"display_name": "Field Ops", "name": None},
         )
     ]
+
+
+def test_build_prompt_field_for_resource_falls_back_when_choices_fail():
+    specs = {
+        spec.name: spec for spec in get_model_field_specs(ExamplePromptModel, "POST")
+    }
+
+    solution_field = build_prompt_field_for_spec(
+        FailingChoiceControlClient(),
+        specs["solution"],
+        11,
+    )
+
+    assert solution_field.kind == "resource"
+    assert solution_field.resource_model_cls is Solution
+    assert solution_field.resource_lookup_choices is None
+    assert solution_field.match_middle is False
 
 
 def test_normalize_prompted_value_resolves_resource_ids():
@@ -187,3 +220,23 @@ def test_prompt_path_rejects_wrong_path_type(tmp_path):
         )
 
     assert "must be a file" in str(exc_info.value)
+
+
+def test_normalize_prompted_value_normalizes_location_json():
+    spec = next(
+        spec
+        for spec in get_model_field_specs(Device, "POST")
+        if spec.name == "fixed_location"
+    )
+    field = Field(
+        key="fixed_location",
+        label="Fixed location",
+        kind="json",
+        required=False,
+    )
+
+    assert normalize_prompted_value(
+        spec,
+        field,
+        '{"latitude": 1.5, "longitude": 2.5}',
+    ) == {"latitude": 1.5, "longitude": 2.5}

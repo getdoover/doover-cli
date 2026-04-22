@@ -629,8 +629,7 @@ update = build_update_command(
     command_help="Update an application.",
     get_state=lambda: get_state(),
     resource_id_param_name="application_id",
-    resource_id_type=int,
-    resource_id_help="Application ID to update.",
+    resource_id_help="Application ID or exact display name/name to update.",
 )
 app.command()(update)
 

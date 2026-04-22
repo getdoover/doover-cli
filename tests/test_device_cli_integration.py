@@ -32,40 +32,47 @@ class FakeRenderer:
         self.render_list_calls.append(data)
 
 
-def test_root_help_lists_device_type_command():
+def test_root_help_lists_device_command():
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
-    assert "device-type" in result.stdout
+    assert "device" in result.stdout
 
 
-def test_device_type_help_lists_subcommands():
-    result = runner.invoke(app, ["device-type", "--help"])
+def test_device_help_lists_subcommands():
+    result = runner.invoke(app, ["device", "--help"])
 
     assert result.exit_code == 0
     assert "list" in result.stdout
     assert "create" in result.stdout
     assert "update" in result.stdout
+    assert "installer-info" in result.stdout
+    assert "installer-tarball" in result.stdout
+    assert "installer-zip" in result.stdout
 
 
-def test_device_type_generated_help_routes_through_root_cli():
-    create_result = runner.invoke(app, ["device-type", "create", "--help"])
-    update_result = runner.invoke(app, ["device-type", "update", "--help"])
+def test_device_generated_help_routes_through_root_cli():
+    create_result = runner.invoke(app, ["device", "create", "--help"])
+    update_result = runner.invoke(app, ["device", "update", "--help"])
 
     assert create_result.exit_code == 0
-    assert "--name" in _strip_ansi(create_result.stdout)
+    create_output = _strip_ansi(create_result.stdout)
+    assert "--display-name" in create_output
+    assert "--type-id" in create_output
+    assert "--group-id" in create_output
+    assert "--fixed-location" in create_output
     assert update_result.exit_code == 0
-    assert "Device type ID or exact name to update." in _strip_ansi(
+    assert "Device ID or exact display name/name to update." in _strip_ansi(
         update_result.stdout
     )
 
 
-def test_device_type_list_happy_path_runs_through_root_app(monkeypatch):
+def test_device_list_happy_path_runs_through_root_app(monkeypatch):
     renderer = FakeRenderer()
     captured = {}
 
     class FakeDevicesClient:
-        def types_list(self, **kwargs):
+        def list(self, **kwargs):
             captured["kwargs"] = kwargs
             return {"results": []}
 
@@ -73,11 +80,11 @@ def test_device_type_list_happy_path_runs_through_root_app(monkeypatch):
         devices = FakeDevicesClient()
 
     monkeypatch.setattr(
-        "doover_cli.apps.device_type.get_state",
+        "doover_cli.apps.device.get_state",
         lambda: (FakeControlClient(), renderer),
     )
 
-    result = runner.invoke(app, ["device-type", "list"])
+    result = runner.invoke(app, ["device", "list"])
 
     assert result.exit_code == 0
     assert captured["kwargs"]["archived"] is None

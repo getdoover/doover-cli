@@ -566,7 +566,7 @@ requires-dist = [
     { name = "jsf", specifier = ">=0.11.2" },
     { name = "paramiko", specifier = ">=3.5.1" },
     { name = "prompt-toolkit", specifier = ">=3.0.52" },
-    { name = "pydoover", git = "https://github.com/getdoover/pydoover" },
+    { name = "pydoover", git = "https://github.com/getdoover/pydoover?branch=chore%2Fupdate-control-api" },
     { name = "pytz", specifier = ">=2025.2" },
     { name = "questionary", specifier = ">=1.10.0" },
     { name = "requests", specifier = ">=2.32.3" },
@@ -1300,6 +1300,7 @@ wheels = [
 
 [[package]]
 name = "pydoover"
+
 version = "1.0.0a9"
 source = { git = "https://github.com/getdoover/pydoover#7eda5f3504eabd2ee2dfe08e4d1a29c6182e1c60" }
 dependencies = [
