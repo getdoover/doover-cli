@@ -1,0 +1,25 @@
+diff --git a/pydoover/models/control/_generated.py b/pydoover/models/control/_generated.py
+index 0000000..0000000 100644
+--- a/pydoover/models/control/_generated.py
++++ b/pydoover/models/control/_generated.py
+@@ -2989,7 +2989,7 @@ class Group(ControlModel):
+         super().__init__(
+             id=id,
+             name=name,
+-            organisation=organisation,
++            organisation=organisation,
+             archived=archived,
+             parent=parent,
+-            children=children,
++            children=[] if children is None else children,
+             shared=shared,
+         )
+@@ -3069,7 +3069,7 @@ class Group(ControlModel):
+         "GroupSimpleSerializerDetail": {
+             "fields": {
+                 "organisation": {'required': True},
+-                "children": {'required': True, 'version': 'GroupSimpleSerializerDetail'},
++                "children": {'required': False, 'version': 'GroupSimpleSerializerDetail'},
+                 "id": {'required': True},
+                 "name": {'required': True},
+                 "archived": {'required': True},

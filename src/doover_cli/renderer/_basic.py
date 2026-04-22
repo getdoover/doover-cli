@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, ContextManager
 import typer
 from pydoover.models.control import ControlModel, ControlPage
 
-from ._base import RendererBase, EmptyEnterable, normalize_render_data
+from ._base import RendererBase, EmptyEnterable, TreeNode, normalize_render_data
 from ..utils import parsers
 from ..utils.crud import parse_optional_bool
 
@@ -34,6 +34,9 @@ class BasicRenderer(RendererBase):
 
     def render(self, data: dict[str, Any] | ControlModel) -> None:
         print(json.dumps(normalize_render_data(data), indent=4))
+
+    def tree(self, data: TreeNode) -> None:
+        self._print_tree(data)
 
     def _prompt_field(self, field: "Field") -> Any:
         default = self._stringify_default(field.default)
@@ -88,3 +91,18 @@ class BasicRenderer(RendererBase):
                 return int(stripped)
             return stripped
         return stripped
+
+    def _print_tree(
+        self,
+        node: TreeNode,
+        *,
+        depth: int = 0,
+        is_root: bool = True,
+    ) -> None:
+        if is_root:
+            print(node.label)
+        else:
+            print(f"{'  ' * depth}- {node.label}")
+
+        for child in node.children:
+            self._print_tree(child, depth=depth + (0 if is_root else 1), is_root=False)

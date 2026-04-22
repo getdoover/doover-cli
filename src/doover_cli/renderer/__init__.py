@@ -1,5 +1,5 @@
 from enum import Enum
-from ._base import RendererBase
+from ._base import RendererBase, TreeNode
 from ._json import JsonRenderer
 from ._basic import BasicRenderer
 from ._default import DefaultRenderer
@@ -25,6 +25,7 @@ __all__ = [
     "setup_renderer",
     "Renderer",
     "RendererBase",
+    "TreeNode",
     "JsonRenderer",
     "DefaultRenderer",
 ]

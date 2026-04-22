@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Any, ContextManager
 
 from pydoover.models.control import ControlModel, ControlPage
 
-from ._base import RendererBase, EmptyEnterable, normalize_render_data
+from ._base import RendererBase, EmptyEnterable, TreeNode, normalize_render_data
 from ._basic import BasicRenderer
 
 if TYPE_CHECKING:
@@ -22,3 +22,6 @@ class JsonRenderer(RendererBase):
 
     def render(self, data: dict[str, Any] | ControlModel) -> None:
         print(json.dumps(normalize_render_data(data), indent=4))
+
+    def tree(self, data: TreeNode) -> None:
+        print(json.dumps(data.to_dict(), indent=4))

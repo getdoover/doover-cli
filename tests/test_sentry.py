@@ -280,12 +280,12 @@ def test_unsupported_control_command_reports_handled_exception(monkeypatch):
         lambda exc, **kwargs: capture_calls.append((exc, kwargs)),
     )
 
-    result = runner.invoke(app, ["agent", "list"])
+    result = runner.invoke(app, ["tunnel", "get"])
 
     assert result.exit_code == 1
     assert "requires pydoover.api.control" in result.stdout
     assert len(capture_calls) == 1
-    assert capture_calls[0][1]["command"] == "agent.list"
+    assert capture_calls[0][1]["command"] == "tunnel.get"
 
 
 def test_env_session_requires_data_api_base_url(monkeypatch):

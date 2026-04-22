@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from rich.console import Console
 from rich.text import Text
 
+from doover_cli.renderer._base import TreeNode
 from doover_cli.renderer._default import DefaultRenderer
 from doover_cli.utils.crud import Field, LookupChoice
 from pydoover.models.control import DeviceType, Organisation, Solution
@@ -106,6 +107,42 @@ def test_render_resource_value_uses_bold_blue_text():
     assert isinstance(rendered, Text)
     assert rendered.plain == "Acme Farms"
     assert str(rendered.style) == "bold blue"
+
+
+def test_tree_renders_rich_tree():
+    console = Console(record=True, width=120)
+    renderer = DefaultRenderer(console=console)
+
+    renderer.tree(
+        TreeNode(
+            "Agents",
+            children=[
+                TreeNode(
+                    "Operations",
+                    children=[
+                        TreeNode(
+                            "Pump Controller (42)",
+                            children=[TreeNode("type: device")],
+                        )
+                    ],
+                )
+            ],
+        )
+    )
+
+    output = console.export_text()
+    assert "Agents" in output
+    assert "Operations" in output
+    assert "Pump Controller (42)" in output
+    assert "type: device" in output
+
+
+def test_tree_label_style_renders_as_text():
+    rendered = DefaultRenderer._render_tree_label(TreeNode("Pump", style="green"))
+
+    assert isinstance(rendered, Text)
+    assert rendered.plain == "Pump"
+    assert str(rendered.style) == "green"
 
 
 class FakeQuestion:

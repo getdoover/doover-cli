@@ -1,5 +1,7 @@
-from pydoover.models.control import ControlModel, ControlPage
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ContextManager
+
+from pydoover.models.control import ControlModel, ControlPage
 
 if TYPE_CHECKING:
     from ..utils.crud import Field
@@ -13,6 +15,20 @@ class EmptyEnterable:
         pass
 
 
+@dataclass(slots=True)
+class TreeNode:
+    label: str
+    children: list["TreeNode"] = field(default_factory=list)
+    style: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "label": self.label,
+            "children": [child.to_dict() for child in self.children],
+            "style": self.style,
+        }
+
+
 class RendererBase:
     def loading(self, message: str) -> ContextManager[Any]:
         raise NotImplementedError()
@@ -24,6 +40,9 @@ class RendererBase:
         raise NotImplementedError()
 
     def render(self, data: dict[str, Any] | ControlModel) -> None:
+        raise NotImplementedError()
+
+    def tree(self, data: TreeNode) -> None:
         raise NotImplementedError()
 
 
