@@ -51,6 +51,8 @@ def resolve_field_kind(
         return "bool"
     if spec.field.type == "json":
         return "json"
+    if spec.field.type == "Location":
+        return "json"
     if spec.field.type == "resource":
         return "resource"
     return "text"
@@ -77,16 +79,19 @@ def build_prompt_field_for_spec(
     if kind == "resource" and spec.field.ref:
         resource_model_cls = resolve_control_model_class(spec.field.ref)
         resource_model_label = humanize_model_name(resource_model_cls.__name__)
-        resource_lookup_choices = load_control_model_choices(
-            client,
-            resource_model_cls,
-            archived=False,
-            ordering="display_name",
-            label_attrs=("display_name", "name"),
-            searchable_attrs=("display_name", "name"),
-            model_label=resource_model_label,
-        )
-        match_middle = True
+        try:
+            resource_lookup_choices = load_control_model_choices(
+                client,
+                resource_model_cls,
+                archived=False,
+                ordering="display_name",
+                label_attrs=("display_name", "name"),
+                searchable_attrs=("display_name", "name"),
+                model_label=resource_model_label,
+            )
+            match_middle = True
+        except Exception:
+            resource_lookup_choices = None
 
     return Field(
         key=spec.name,

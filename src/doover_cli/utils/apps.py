@@ -20,6 +20,8 @@ def get_id_or_key(data: dict[str, Any], key: str) -> Any:
 
 
 class LocalApplication(ControlApplication):
+    _model_name = None
+
     def __init__(
         self,
         *,

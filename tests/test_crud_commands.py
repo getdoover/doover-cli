@@ -3,7 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import get_args
 
-from pydoover.models.control import DeviceType, Solution
+from pydoover.models.control import Device, DeviceType, Group, Location, Solution
 
 from doover_cli.utils.crud.commands import (
     build_create_command,
@@ -56,12 +56,12 @@ def test_update_callback_signature_includes_resource_id_argument():
         command_help="Update a device type.",
         get_state=lambda: (None, None),
         resource_id_param_name="device_type_id",
-        resource_id_type=int,
         resource_id_help="Device type ID to update.",
     )
 
     signature = callback.__signature__
     assert "device_type_id" in signature.parameters
+    assert get_args(signature.parameters["device_type_id"].annotation)[0] is str
     assert "name" in signature.parameters
 
 
@@ -152,7 +152,6 @@ def test_update_callback_fetches_current_values_and_uses_patch(monkeypatch):
         command_help="Update a device type.",
         get_state=lambda: (FakeControlClient(), renderer),
         resource_id_param_name="device_type_id",
-        resource_id_type=int,
         resource_id_help="Device type ID to update.",
     )
 
@@ -197,10 +196,90 @@ def test_update_callback_prints_when_nothing_changes(capsys):
         command_help="Update a device type.",
         get_state=lambda: (FakeControlClient(), renderer),
         resource_id_param_name="device_type_id",
-        resource_id_type=int,
         resource_id_help="Device type ID to update.",
     )
 
     callback(ctx=None, device_type_id=55, _profile=None)
+
+    assert capsys.readouterr().out.strip() == "No changes submitted."
+
+
+def test_create_callback_signature_includes_fixed_location_for_devices():
+    callback = build_create_command(
+        model_cls=Device,
+        command_help="Create a device.",
+        get_state=lambda: (None, None),
+    )
+
+    signature = callback.__signature__
+    assert "fixed_location" in signature.parameters
+
+
+def test_update_callback_signature_includes_fixed_location_for_devices():
+    callback = build_update_command(
+        model_cls=Device,
+        command_help="Update a device.",
+        get_state=lambda: (None, None),
+        resource_id_param_name="device_id",
+        resource_id_help="Device ID to update.",
+    )
+
+    signature = callback.__signature__
+    assert "fixed_location" in signature.parameters
+
+
+def test_update_callback_skips_patch_when_location_is_unchanged(capsys):
+    renderer = FakeRenderer(
+        {
+            "display_name": "Tracker",
+            "type": "Field Type (9)",
+            "group": "Main Group (10)",
+            "fixed_location": '{"latitude": 1, "longitude": 2}',
+        }
+    )
+
+    class FakeControlClient:
+        def get_control_methods(self, model_cls):
+            if model_cls is DeviceType:
+                return _resource_methods(
+                    list=lambda **kwargs: SimpleNamespace(
+                        results=[SimpleNamespace(id=9, display_name="Field Type")],
+                        count=1,
+                        next=None,
+                    )
+                )
+            if model_cls is Group:
+                return _resource_methods(
+                    list=lambda **kwargs: SimpleNamespace(
+                        results=[SimpleNamespace(id=10, display_name="Main Group")],
+                        count=1,
+                        next=None,
+                    )
+                )
+            assert model_cls is Device
+            return _resource_methods(
+                get=lambda device_id: SimpleNamespace(
+                    display_name="Tracker",
+                    type=SimpleNamespace(id=9, display_name="Field Type"),
+                    group=SimpleNamespace(id=10, display_name="Main Group"),
+                    fixed_location=Location(latitude=1.0, longitude=2.0),
+                ),
+                patch=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("No patch should be sent")
+                ),
+                put=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("No put should be sent")
+                ),
+            )
+
+    callback = build_update_command(
+        model_cls=Device,
+        command_help="Update a device.",
+        get_state=lambda: (FakeControlClient(), renderer),
+        resource_id_param_name="device_id",
+        resource_id_help="Device ID to update.",
+    )
+
+    callback(ctx=None, device_id=55, _profile=None)
 
     assert capsys.readouterr().out.strip() == "No changes submitted."

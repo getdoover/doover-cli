@@ -36,7 +36,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-pydoover = { git = "https://github.com/getdoover/pydoover" }
+pydoover = { git = "https://github.com/getdoover/pydoover", branch = "chore/update-control-api" }
 
 [tool.ty.environment]
 python = "./.venv"

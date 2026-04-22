@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Callable
 import typer
 
 from ..api import ProfileAnnotation
-from .lookup import humanize_model_name
+from .lookup import humanize_model_name, prompt_resource, resource_autocomplete
 from .prompting import prompt_model_values
 from .schema import ModelVersionFieldSpec, get_model_field_specs, get_update_method
 from .values import (
@@ -68,6 +68,21 @@ def _build_option_info_for_spec(
         option_info.file_okay = True
         option_info.dir_okay = False
     return option_info
+
+
+def _get_lookup_label_attrs(model_cls: type[Any]) -> tuple[str, ...]:
+    field_names = set(getattr(model_cls, "_field_defs", {}))
+    label_attrs = [
+        field_name
+        for field_name in ("display_name", "name")
+        if field_name in field_names
+    ]
+    return tuple(label_attrs or ("display_name", "name"))
+
+
+def _get_lookup_ordering(model_cls: type[Any]) -> str | None:
+    label_attrs = _get_lookup_label_attrs(model_cls)
+    return label_attrs[0] if label_attrs else None
 
 
 def _build_option_parameters(
@@ -168,11 +183,12 @@ def build_update_command(
     command_help: str,
     get_state: Callable[[], tuple[Any, Any]],
     resource_id_param_name: str,
-    resource_id_type: type[Any],
     resource_id_help: str,
 ):
     update_method = get_update_method(model_cls)
     specs = get_model_field_specs(model_cls, update_method)
+    label_attrs = _get_lookup_label_attrs(model_cls)
+    lookup_ordering = _get_lookup_ordering(model_cls)
 
     def callback(**kwargs: Any):
         _ = kwargs.pop("_profile", None)
@@ -180,6 +196,18 @@ def build_update_command(
         resource_id = kwargs.pop(resource_id_param_name)
 
         client, renderer = get_state()
+        resource_id = prompt_resource(
+            model_cls,
+            client,
+            renderer,
+            action="update",
+            lookup=str(resource_id),
+            archived=False,
+            ordering=lookup_ordering,
+            label_attrs=label_attrs,
+            searchable_attrs=label_attrs,
+        )
+
         methods = client.get_control_methods(model_cls)
         provided_values = {
             spec.name: kwargs.get(spec.name)
@@ -253,8 +281,17 @@ def build_update_command(
         renderer.render(response)
 
     resource_argument = _build_runtime_annotated(
-        resource_id_type,
-        typer.Argument(help=resource_id_help),
+        str,
+        typer.Argument(
+            help=resource_id_help,
+            autocompletion=resource_autocomplete(
+                model_cls,
+                archived=False,
+                ordering=lookup_ordering,
+                label_attrs=label_attrs,
+                searchable_attrs=label_attrs,
+            ),
+        ),
     )
     parameters = [
         inspect.Parameter(

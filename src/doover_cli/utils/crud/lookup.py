@@ -20,6 +20,11 @@ class LookupChoice:
 
 
 def resolve_control_model_class(ref: str) -> type[Any]:
+    if ref.startswith("Nested"):
+        model_cls = getattr(control_models, ref.removeprefix("Nested"), None)
+        if isinstance(model_cls, type):
+            return model_cls
+
     try:
         model_cls = getattr(control_models, ref)
     except AttributeError as exc:

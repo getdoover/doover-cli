@@ -429,6 +429,68 @@ def test_device_type_update_with_options_patches_payload(monkeypatch):
     assert renderer.render_calls == [{"id": 55}]
 
 
+def test_device_type_update_accepts_name_lookup(monkeypatch):
+    captured = {}
+    renderer = FakeRenderer()
+
+    class FakeControlClient:
+        def get_control_methods(self, model_cls):
+            assert model_cls is DeviceType
+            return _resource_methods(
+                list=lambda **kwargs: (
+                    captured.setdefault("list_kwargs", kwargs),
+                    SimpleNamespace(
+                        results=[
+                            SimpleNamespace(
+                                id=160631245057827589,
+                                name="field-tracker-alpha",
+                            ),
+                        ],
+                        count=1,
+                        next=None,
+                    ),
+                )[-1],
+                get=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("interactive fetch should not be used")
+                ),
+                patch=lambda device_type_id, payload: (
+                    captured.setdefault("device_type_id", device_type_id),
+                    captured.setdefault("payload", payload),
+                    {"id": 160631245057827589},
+                )[-1],
+                put=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("PATCH should be used when available")
+                ),
+            )
+
+    monkeypatch.setattr(
+        "doover_cli.apps.device_type.get_state",
+        lambda: (FakeControlClient(), renderer),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "device-type",
+            "update",
+            "field-tracker-alpha (160631245057827589)",
+            "--name",
+            "updated-tracker",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["list_kwargs"] == {
+        "archived": False,
+        "ordering": "name",
+        "page": 1,
+        "per_page": 100,
+    }
+    assert captured["device_type_id"] == "160631245057827589"
+    assert captured["payload"] == {"name": "updated-tracker"}
+    assert renderer.render_calls == [{"id": 160631245057827589}]
+
+
 def test_device_type_update_without_options_fetches_and_prompts(monkeypatch):
     captured = {}
     renderer = FakeRenderer(
