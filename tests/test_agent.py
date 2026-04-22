@@ -3,11 +3,6 @@ from contextlib import nullcontext
 from typer.testing import CliRunner
 
 from doover_cli import app
-from doover_cli.colours import (
-    DEVICE_COLOUR,
-    GROUP_COLOUR,
-    ORGANISATION_COLOUR,
-)
 from doover_cli.agent import build_agents_tree
 from doover_cli.renderer._base import TreeNode
 from doover_cli.renderer._basic import BasicRenderer
@@ -132,7 +127,7 @@ def test_agent_list_tree_uses_renderer_tree(monkeypatch):
     assert result.exit_code == 0
     assert renderer.render_list_calls == []
     assert len(renderer.tree_calls) == 1
-    assert renderer.tree_calls[0].label == "Agents"
+    assert isinstance(renderer.tree_calls[0].element, Agents)
 
 
 def test_agent_list_include_archived_passes_pydoover_option(monkeypatch):
@@ -160,39 +155,48 @@ def test_agent_list_include_archived_passes_pydoover_option(monkeypatch):
 def test_build_agents_tree_groups_agents_and_preserves_fields():
     tree = build_agents_tree(_agents_response())
 
-    assert tree.label == "Agents"
-    assert [child.label for child in tree.children] == ["Operations", "Field Team"]
+    assert isinstance(tree.element, Agents)
+    assert [child.element.name for child in tree.children] == [
+        "Operations",
+        "Field Team",
+    ]
 
     operations = tree.children[0]
-    assert operations.style == GROUP_COLOUR
-    assert [child.label for child in operations.children] == ["Irrigation"]
+    assert isinstance(operations.element, Group)
+    assert [child.element.name for child in operations.children] == ["Irrigation"]
 
     irrigation = operations.children[0]
-    assert irrigation.style == GROUP_COLOUR
+    assert isinstance(irrigation.element, Group)
     pump = irrigation.children[0]
-    assert pump.label == "Pump Controller (pump-controller | 101) device"
+    assert isinstance(pump.element, Agent)
+    assert pump.element.name == "pump-controller"
+    assert pump.element.display_name == "Pump Controller"
+    assert pump.element.id == 101
+    assert pump.element.archived is False
     assert pump.children == []
-    assert pump.style == DEVICE_COLOUR
 
     field_team = tree.children[1]
-    assert field_team.style == GROUP_COLOUR
+    assert isinstance(field_team.element, Group)
     solar = field_team.children[0]
-    assert solar.label == "Solar Monitor (solar-monitor | 202) device (Archived)"
+    assert isinstance(solar.element, Agent)
+    assert solar.element.name == "solar-monitor"
+    assert solar.element.archived is True
     assert solar.children == []
-    assert solar.style == "dim " + DEVICE_COLOUR
 
 
-def test_build_agents_tree_colours_organisation_fields_for_non_device_agents():
+def test_build_agents_tree_includes_non_device_agents_as_single_nodes():
     response = _agents_response()
     response.agents[0].type = "service"
 
     tree = build_agents_tree(response)
     pump = tree.children[0].children[0].children[0]
 
-    assert (
-        TreeNode("organisation: Acme Farms", style=ORGANISATION_COLOUR)
-        in pump.children
-    )
+    # Non-device agents are leaf nodes — the renderer decides how to
+    # present their fields (no field-expansion in the tree itself).
+    assert isinstance(pump.element, Agent)
+    assert pump.element.type == "service"
+    assert pump.element.organisation == "Acme Farms"
+    assert pump.children == []
 
 
 def test_build_agents_tree_attaches_agents_by_numeric_group_id():
@@ -201,10 +205,14 @@ def test_build_agents_tree_attaches_agents_by_numeric_group_id():
 
     tree = build_agents_tree(response)
 
-    assert [child.label for child in tree.children] == ["Operations", "Field Team"]
-    assert tree.children[0].children[0].children[0].label == (
-        "Pump Controller (pump-controller | 101) device"
-    )
+    assert [child.element.name for child in tree.children] == [
+        "Operations",
+        "Field Team",
+    ]
+    pump = tree.children[0].children[0].children[0]
+    assert isinstance(pump.element, Agent)
+    assert pump.element.name == "pump-controller"
+    assert pump.element.id == 101
 
 
 def test_build_agents_tree_handles_raw_dict_groups_and_dict_type_devices():
@@ -249,10 +257,13 @@ def test_build_agents_tree_handles_raw_dict_groups_and_dict_type_devices():
     )
 
     child = tree.children[0].children[0]
-    assert child.label == "Child"
-    assert child.children[0].label == "test-doovit (test-doovit | 101) device"
-    assert child.children[0].children == []
-    assert child.children[0].style == DEVICE_COLOUR
+    assert isinstance(child.element, Group)
+    assert child.element.name == "Child"
+    agent_node = child.children[0]
+    assert isinstance(agent_node.element, Agent)
+    assert agent_node.element.name == "test-doovit"
+    assert agent_node.element.id == 101
+    assert agent_node.children == []
 
 
 def test_build_agents_tree_indexes_nested_group_children():
@@ -265,11 +276,16 @@ def test_build_agents_tree_indexes_nested_group_children():
 
     tree = build_agents_tree(response)
 
-    assert [child.label for child in tree.children] == ["Operations", "Field Team"]
-    assert tree.children[0].children[0].label == "Irrigation"
-    assert tree.children[0].children[0].children[0].label == (
-        "Pump Controller (pump-controller | 101) device"
-    )
+    assert [child.element.name for child in tree.children] == [
+        "Operations",
+        "Field Team",
+    ]
+    irrigation = tree.children[0].children[0]
+    assert irrigation.element.name == "Irrigation"
+    pump = irrigation.children[0]
+    assert isinstance(pump.element, Agent)
+    assert pump.element.name == "pump-controller"
+    assert pump.element.id == 101
 
 
 def test_basic_renderer_tree_uses_plain_indented_lines(capsys):
@@ -277,14 +293,18 @@ def test_basic_renderer_tree_uses_plain_indented_lines(capsys):
 
     renderer.tree(
         TreeNode(
-            "Agents",
+            Agents(),
             children=[
                 TreeNode(
-                    "Operations",
+                    Group(name="Operations"),
                     children=[
                         TreeNode(
-                            "Pump Controller (42)",
-                            children=[TreeNode("type: device")],
+                            Agent(
+                                id=42,
+                                name="pump-controller",
+                                display_name="Pump Controller",
+                                type="device",
+                            ),
                         )
                     ],
                 )
@@ -295,6 +315,5 @@ def test_basic_renderer_tree_uses_plain_indented_lines(capsys):
     assert capsys.readouterr().out == (
         "Agents\n"
         "- Operations\n"
-        "  - Pump Controller (42)\n"
-        "    - type: device\n"
+        "  - Pump Controller (pump-controller | 42) device\n"
     )

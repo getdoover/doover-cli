@@ -6,13 +6,13 @@ from typing import Any
 
 import questionary
 import typer
-from pydoover.models.control import ControlModel, ControlPage
+from pydoover.models.control import Agent, Agents, ControlModel, ControlPage
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 
-from ._base import RendererBase, TreeNode, normalize_render_data
+from ._base import RendererBase, TreeNode, format_tree_label, normalize_render_data
 from ..colours import ENTITY_COLOURS
 from ..utils import parsers
 from ..utils.crud import parse_optional_bool
@@ -35,6 +35,30 @@ def _style_for_key(key: str | None) -> str | None:
     if key is None:
         return None
     return ENTITY_COLOURS.get(key)
+
+
+def _style_for_tree_node(element: ControlModel) -> str | None:
+    """Pick a colour for a TreeNode based on its element's entity type.
+
+    Unlike ``_style_for_resource``, tree nodes don't fall back to a default
+    style — the root ``Agents`` container and non-device ``Agent``s render
+    plain. Archived elements get a ``"dim "`` prefix.
+    """
+    if isinstance(element, Agents):
+        return None
+    if isinstance(element, Agent):
+        agent_type = getattr(element, "type", None) or "device"
+        if agent_type not in {"device", "dict"}:
+            return None
+        style = ENTITY_COLOURS["device"]
+    else:
+        model_name = getattr(element, "_model_name", None) or type(element).__name__
+        style = ENTITY_COLOURS.get(model_name.lower())
+        if style is None:
+            return None
+    if getattr(element, "archived", False):
+        return "dim " + style
+    return style
 
 
 class DefaultRenderer(RendererBase):
@@ -451,6 +475,8 @@ class DefaultRenderer(RendererBase):
 
     @staticmethod
     def _render_tree_label(node: TreeNode) -> str | Text:
-        if node.style:
-            return Text(node.label, style=node.style)
-        return node.label
+        label = format_tree_label(node.element)
+        style = _style_for_tree_node(node.element)
+        if style:
+            return Text(label, style=style)
+        return label
