@@ -13,6 +13,7 @@ from ..utils.crud import (
 )
 from ..utils.api import ProfileAnnotation
 from ..utils.state import state
+from .app_install import device_app as app_installs_app
 
 if TYPE_CHECKING:
     from pydoover.api import ControlClient
@@ -20,6 +21,11 @@ if TYPE_CHECKING:
 
 
 app = typer.Typer(no_args_is_help=True)
+app.add_typer(
+    app_installs_app,
+    name="app-installs",
+    help="Manage application installations on a device.",
+)
 _DEVICE_LABEL_ATTRS = ("display_name", "name")
 
 
@@ -112,7 +118,9 @@ def list_(
             help="Filter by case-insensitive display name substring.",
         ),
     ] = None,
-    group: Annotated[str | None, typer.Option(help="Filter by group identifier.")] = None,
+    group: Annotated[
+        str | None, typer.Option(help="Filter by group identifier.")
+    ] = None,
     group_tree: Annotated[
         str | None, typer.Option(help="Filter by group tree identifier.")
     ] = None,
@@ -154,7 +162,9 @@ def list_(
         int | None, typer.Option("--per-page", help="Number of records per page.")
     ] = None,
     search: Annotated[str | None, typer.Option(help="Full-text search term.")] = None,
-    type: Annotated[str | None, typer.Option(help="Filter by device type identifier.")] = None,
+    type: Annotated[
+        str | None, typer.Option(help="Filter by device type identifier.")
+    ] = None,
     _profile: ProfileAnnotation = None,
 ):
     """List devices."""

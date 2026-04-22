@@ -30,7 +30,15 @@ else:
         return Annotated[annotation_type, option_info]
 
 
+def _to_option_name(name: str) -> str:
+    return f"--{name.replace('_', '-')}"
+
+
 def _get_option_type_for_spec(spec: ModelVersionFieldSpec) -> Any:
+    if spec.field.is_array:
+        if spec.field.type == "resource" and (spec.output_id or "").endswith("_ids"):
+            return list[int] | None
+        return list[str] | None
     if spec.name == "installer":
         return Path | None
     if spec.field.type in {"integer", "SnowflakeId"}:
@@ -38,8 +46,6 @@ def _get_option_type_for_spec(spec: ModelVersionFieldSpec) -> Any:
     if spec.field.type == "resource" and (spec.output_id or "").endswith("_id"):
         return int | None
     return str | None
-
-
 
 
 def _get_option_help_for_spec(spec: ModelVersionFieldSpec, *, update: bool) -> str:
@@ -58,8 +64,13 @@ def _build_option_info_for_spec(
     *,
     update: bool,
 ) -> Any:
+    option_names = spec.option_names
+    if spec.field.is_array and spec.output_id and spec.output_id.endswith("_ids"):
+        singular_id_option = _to_option_name(spec.output_id.removesuffix("s"))
+        option_names = (singular_id_option, *option_names)
+
     option_info = typer.Option(
-        *spec.option_names,
+        *option_names,
         help=_get_option_help_for_spec(spec, update=update),
         show_default=False,
     )

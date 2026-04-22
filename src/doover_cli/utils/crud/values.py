@@ -18,7 +18,9 @@ def _raise_location_error(spec: ModelVersionFieldSpec, message: str) -> None:
     )
 
 
-def _coerce_location_number(spec: ModelVersionFieldSpec, key: str, value: Any) -> float | None:
+def _coerce_location_number(
+    spec: ModelVersionFieldSpec, key: str, value: Any
+) -> float | None:
     if value is None:
         return None
     if isinstance(value, bool):
@@ -36,7 +38,9 @@ def _coerce_location_number(spec: ModelVersionFieldSpec, key: str, value: Any) -
     _raise_location_error(spec, f"must use numeric {key} values.")
 
 
-def _normalize_location_value(spec: ModelVersionFieldSpec, raw_value: Any) -> dict[str, float | None]:
+def _normalize_location_value(
+    spec: ModelVersionFieldSpec, raw_value: Any
+) -> dict[str, float | None]:
     if isinstance(raw_value, str):
         raw_value = parsers.maybe_json(raw_value)
     elif hasattr(raw_value, "latitude") and hasattr(raw_value, "longitude"):
@@ -62,11 +66,17 @@ def _normalize_location_value(spec: ModelVersionFieldSpec, raw_value: Any) -> di
     missing_keys = [key for key in ("latitude", "longitude") if key not in raw_value]
     if missing_keys:
         joined_keys = ", ".join(missing_keys)
-        _raise_location_error(spec, f"must include both latitude and longitude. Missing: {joined_keys}.")
+        _raise_location_error(
+            spec, f"must include both latitude and longitude. Missing: {joined_keys}."
+        )
 
     return {
-        "latitude": _coerce_location_number(spec, "latitude", raw_value.get("latitude")),
-        "longitude": _coerce_location_number(spec, "longitude", raw_value.get("longitude")),
+        "latitude": _coerce_location_number(
+            spec, "latitude", raw_value.get("latitude")
+        ),
+        "longitude": _coerce_location_number(
+            spec, "longitude", raw_value.get("longitude")
+        ),
     }
 
 
@@ -85,7 +95,7 @@ def parse_optional_bool(value: str | None, option_name: str) -> bool | None:
     )
 
 
-def coerce_cli_value(spec: ModelVersionFieldSpec, raw_value: Any) -> Any:
+def _coerce_cli_scalar_value(spec: ModelVersionFieldSpec, raw_value: Any) -> Any:
     if raw_value is None:
         return None
     if spec.field.type == "json" and isinstance(raw_value, (dict, list)):
@@ -127,6 +137,29 @@ def coerce_cli_value(spec: ModelVersionFieldSpec, raw_value: Any) -> Any:
             return int(stripped)
         return stripped
     return stripped
+
+
+def coerce_cli_value(spec: ModelVersionFieldSpec, raw_value: Any) -> Any:
+    if raw_value is None:
+        return None
+
+    if spec.field.is_array:
+        if isinstance(raw_value, str):
+            parsed = parsers.maybe_json(raw_value)
+            if isinstance(parsed, list):
+                raw_values = parsed
+            else:
+                raw_values = [
+                    item.strip() for item in raw_value.split(",") if item.strip()
+                ]
+        elif isinstance(raw_value, (list, tuple)):
+            raw_values = list(raw_value)
+        else:
+            raw_values = [raw_value]
+
+        return [_coerce_cli_scalar_value(spec, item) for item in raw_values]
+
+    return _coerce_cli_scalar_value(spec, raw_value)
 
 
 def normalize_model_values(

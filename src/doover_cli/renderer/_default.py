@@ -131,7 +131,7 @@ class DefaultRenderer(RendererBase):
         rows: list[dict[str, Any]],
         caption: str | None = None,
     ) -> Table:
-        table = Table(caption=caption)
+        table = Table(caption=caption, padding=0)
         for column in columns:
             table.add_column(
                 column,
