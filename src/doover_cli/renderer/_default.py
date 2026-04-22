@@ -10,8 +10,9 @@ from pydoover.models.control import ControlModel, ControlPage
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
+from rich.tree import Tree
 
-from ._base import RendererBase, normalize_render_data
+from ._base import RendererBase, TreeNode, normalize_render_data
 from ..utils import parsers
 from ..utils.crud import parse_optional_bool
 from ..utils.crud.lookup import resolve_resource_lookup
@@ -44,6 +45,11 @@ class DefaultRenderer(RendererBase):
 
     def render(self, data: dict[str, Any] | ControlModel) -> None:
         self._render_rows([data])
+
+    def tree(self, data: TreeNode) -> None:
+        tree = Tree(self._render_tree_label(data))
+        self._add_tree_children(tree, data)
+        self.console.print(tree)
 
     def _render_rows(self, items: list[Any], *, caption: str | None = None) -> None:
         if not items:
@@ -330,3 +336,14 @@ class DefaultRenderer(RendererBase):
         if field.kind == "resource" and stripped.lstrip("-").isdigit():
             return int(stripped)
         return stripped
+
+    def _add_tree_children(self, branch: Tree, node: TreeNode) -> None:
+        for child in node.children:
+            child_branch = branch.add(self._render_tree_label(child))
+            self._add_tree_children(child_branch, child)
+
+    @staticmethod
+    def _render_tree_label(node: TreeNode) -> str | Text:
+        if node.style:
+            return Text(node.label, style=node.style)
+        return node.label
