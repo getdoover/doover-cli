@@ -55,7 +55,9 @@ def test_device_type_generated_help_routes_through_root_cli():
     assert create_result.exit_code == 0
     assert "--name" in _strip_ansi(create_result.stdout)
     assert update_result.exit_code == 0
-    assert "Device type ID to update." in _strip_ansi(update_result.stdout)
+    assert "Device type ID or exact name to update." in _strip_ansi(
+        update_result.stdout
+    )
 
 
 def test_device_type_list_happy_path_runs_through_root_app(monkeypatch):

@@ -419,6 +419,68 @@ def test_device_update_with_options_patches_payload(monkeypatch):
     assert renderer.render_calls == [{"id": 55}]
 
 
+def test_device_update_accepts_display_name_lookup(monkeypatch):
+    captured = {}
+    renderer = FakeRenderer()
+
+    class FakeControlClient:
+        def get_control_methods(self, model_cls):
+            assert model_cls is Device
+            return _resource_methods(
+                list=lambda **kwargs: (
+                    captured.setdefault("list_kwargs", kwargs),
+                    SimpleNamespace(
+                        results=[
+                            SimpleNamespace(
+                                id=160631245057827589,
+                                display_name="Field Tracker Alpha",
+                            ),
+                        ],
+                        count=1,
+                        next=None,
+                    ),
+                )[-1],
+                get=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("interactive fetch should not be used")
+                ),
+                patch=lambda device_id, payload: (
+                    captured.setdefault("device_id", device_id),
+                    captured.setdefault("payload", payload),
+                    {"id": 160631245057827589},
+                )[-1],
+                put=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                    AssertionError("PATCH should be used when available")
+                ),
+            )
+
+    monkeypatch.setattr(
+        "doover_cli.apps.device.get_state",
+        lambda: (FakeControlClient(), renderer),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "device",
+            "update",
+            "Field Tracker Alpha (160631245057827589)",
+            "--display-name",
+            "Updated Tracker",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["list_kwargs"] == {
+        "archived": False,
+        "ordering": "display_name",
+        "page": 1,
+        "per_page": 100,
+    }
+    assert captured["device_id"] == "160631245057827589"
+    assert captured["payload"] == {"display_name": "Updated Tracker"}
+    assert renderer.render_calls == [{"id": 160631245057827589}]
+
+
 def test_device_update_without_options_fetches_and_prompts(monkeypatch):
     captured = {}
     renderer = FakeRenderer(
@@ -645,9 +707,9 @@ def test_device_installer_writes_default_output(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
 
     class FakeDevicesClient:
-        def installer(self, device_id):
+        def installer_download(self, device_id):
             assert device_id == "42"
-            return "#!/bin/sh\necho hi\n"
+            return b"#!/bin/sh\necho hi\n"
 
     class FakeControlClient:
         devices = FakeDevicesClient()
@@ -670,9 +732,9 @@ def test_device_installer_writes_explicit_output(monkeypatch, tmp_path):
     output_path = tmp_path / "installer.sh"
 
     class FakeDevicesClient:
-        def installer(self, device_id):
+        def installer_download(self, device_id):
             assert device_id == "42"
-            return "#!/bin/sh\necho hi\n"
+            return b"#!/bin/sh\necho hi\n"
 
     class FakeControlClient:
         devices = FakeDevicesClient()
@@ -689,6 +751,33 @@ def test_device_installer_writes_explicit_output(monkeypatch, tmp_path):
 
     assert result.exit_code == 0
     assert output_path.read_text(encoding="utf-8") == "#!/bin/sh\necho hi\n"
+
+
+def test_device_installer_writes_zip_download(monkeypatch, tmp_path):
+    renderer = FakeRenderer()
+    output_path = tmp_path / "installer.zip"
+    zip_bytes = b"PK\x03\x04zip-bytes"
+
+    class FakeDevicesClient:
+        def installer_download(self, device_id):
+            assert device_id == "42"
+            return zip_bytes
+
+    class FakeControlClient:
+        devices = FakeDevicesClient()
+
+    monkeypatch.setattr(
+        "doover_cli.apps.device.get_state",
+        lambda: (FakeControlClient(), renderer),
+    )
+
+    result = runner.invoke(
+        app,
+        ["device", "installer", "42", "--output", str(output_path)],
+    )
+
+    assert result.exit_code == 0
+    assert output_path.read_bytes() == zip_bytes
 
 
 def test_device_installer_tarball_writes_default_output(monkeypatch, tmp_path):
@@ -750,7 +839,7 @@ def test_device_installer_downloads_fail_when_output_exists(monkeypatch, tmp_pat
     output_path.write_text("existing", encoding="utf-8")
 
     class FakeDevicesClient:
-        def installer(self, device_id):
+        def installer_download(self, device_id):
             raise AssertionError("Installer should not be downloaded when file exists")
 
     class FakeControlClient:

@@ -1301,7 +1301,7 @@ wheels = [
 [[package]]
 name = "pydoover"
 version = "1.0.0a8"
-source = { git = "https://github.com/getdoover/pydoover?branch=chore%2Fupdate-control-api#f23185bf2e699d2515548c320685f6c282a0b5b5" }
+source = { git = "https://github.com/getdoover/pydoover?branch=chore%2Fupdate-control-api#43fe727166c652128abee7bb919b36b60a735660" }
 dependencies = [
     { name = "aiohttp" },
     { name = "httpx" },

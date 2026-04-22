@@ -68,6 +68,16 @@ class FakeControlClient:
         )
 
 
+class FailingChoiceControlClient:
+    def get_control_methods(self, model_cls):
+        assert model_cls is Solution
+        return SimpleNamespace(
+            list=lambda **kwargs: (_ for _ in ()).throw(
+                ValueError("bad nested API data")
+            )
+        )
+
+
 def test_humanize_helpers_and_field_kind_resolution():
     specs = {
         spec.name: spec for spec in get_model_field_specs(ExamplePromptModel, "POST")
@@ -110,6 +120,23 @@ def test_build_prompt_field_for_spec_sets_installer_and_resource_details():
             field_values={"display_name": "Field Ops", "name": None},
         )
     ]
+
+
+def test_build_prompt_field_for_resource_falls_back_when_choices_fail():
+    specs = {
+        spec.name: spec for spec in get_model_field_specs(ExamplePromptModel, "POST")
+    }
+
+    solution_field = build_prompt_field_for_spec(
+        FailingChoiceControlClient(),
+        specs["solution"],
+        11,
+    )
+
+    assert solution_field.kind == "resource"
+    assert solution_field.resource_model_cls is Solution
+    assert solution_field.resource_lookup_choices is None
+    assert solution_field.match_middle is False
 
 
 def test_normalize_prompted_value_resolves_resource_ids():

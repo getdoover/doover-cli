@@ -62,7 +62,9 @@ def test_device_generated_help_routes_through_root_cli():
     assert "--group-id" in create_output
     assert "--fixed-location" in create_output
     assert update_result.exit_code == 0
-    assert "Device ID to update." in _strip_ansi(update_result.stdout)
+    assert "Device ID or exact display name/name to update." in _strip_ansi(
+        update_result.stdout
+    )
 
 
 def test_device_list_happy_path_runs_through_root_app(monkeypatch):

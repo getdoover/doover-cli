@@ -185,8 +185,7 @@ update = build_update_command(
     command_help="Update a device type.",
     get_state=lambda: get_state(),
     resource_id_param_name="device_type_id",
-    resource_id_type=int,
-    resource_id_help="Device type ID to update.",
+    resource_id_help="Device type ID or exact name to update.",
 )
 app.command()(update)
 

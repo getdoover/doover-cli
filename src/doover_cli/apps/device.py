@@ -73,15 +73,15 @@ def _resolve_output_path(
     return path
 
 
-def _write_installer_text(output_path: Path, installer_data: object) -> None:
+def _write_installer_download(output_path: Path, installer_data: object) -> None:
     if isinstance(installer_data, bytes):
-        content = installer_data.decode("utf-8")
-    elif isinstance(installer_data, str):
         content = installer_data
+    elif isinstance(installer_data, str):
+        content = installer_data.encode("utf-8")
     else:
-        content = str(installer_data)
+        content = str(installer_data).encode("utf-8")
 
-    output_path.write_text(content, encoding="utf-8")
+    output_path.write_bytes(content)
 
 
 @app.command(name="list")
@@ -227,8 +227,7 @@ update = build_update_command(
     command_help="Update a device.",
     get_state=lambda: get_state(),
     resource_id_param_name="device_id",
-    resource_id_type=int,
-    resource_id_help="Device ID to update.",
+    resource_id_help="Device ID or exact display name/name to update.",
 )
 app.command()(update)
 
@@ -334,7 +333,7 @@ def installer(
     ] = None,
     _profile: ProfileAnnotation = None,
 ):
-    """Download the installer script for a device."""
+    """Download the installer package for a device."""
     _ = _profile
     client, renderer = get_state()
 
@@ -351,9 +350,9 @@ def installer(
     )
 
     with renderer.loading("Downloading installer..."):
-        response = client.devices.installer(str(resolved_id))
+        response = client.devices.installer_download(str(resolved_id))
 
-    _write_installer_text(output_path, response)
+    _write_installer_download(output_path, response)
     print(f"Saved installer to {output_path}")
 
 

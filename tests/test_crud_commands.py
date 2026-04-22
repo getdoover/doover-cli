@@ -56,12 +56,12 @@ def test_update_callback_signature_includes_resource_id_argument():
         command_help="Update a device type.",
         get_state=lambda: (None, None),
         resource_id_param_name="device_type_id",
-        resource_id_type=int,
         resource_id_help="Device type ID to update.",
     )
 
     signature = callback.__signature__
     assert "device_type_id" in signature.parameters
+    assert get_args(signature.parameters["device_type_id"].annotation)[0] is str
     assert "name" in signature.parameters
 
 
@@ -152,7 +152,6 @@ def test_update_callback_fetches_current_values_and_uses_patch(monkeypatch):
         command_help="Update a device type.",
         get_state=lambda: (FakeControlClient(), renderer),
         resource_id_param_name="device_type_id",
-        resource_id_type=int,
         resource_id_help="Device type ID to update.",
     )
 
@@ -197,7 +196,6 @@ def test_update_callback_prints_when_nothing_changes(capsys):
         command_help="Update a device type.",
         get_state=lambda: (FakeControlClient(), renderer),
         resource_id_param_name="device_type_id",
-        resource_id_type=int,
         resource_id_help="Device type ID to update.",
     )
 
@@ -223,7 +221,6 @@ def test_update_callback_signature_includes_fixed_location_for_devices():
         command_help="Update a device.",
         get_state=lambda: (None, None),
         resource_id_param_name="device_id",
-        resource_id_type=int,
         resource_id_help="Device ID to update.",
     )
 
@@ -280,7 +277,6 @@ def test_update_callback_skips_patch_when_location_is_unchanged(capsys):
         command_help="Update a device.",
         get_state=lambda: (FakeControlClient(), renderer),
         resource_id_param_name="device_id",
-        resource_id_type=int,
         resource_id_help="Device ID to update.",
     )
 

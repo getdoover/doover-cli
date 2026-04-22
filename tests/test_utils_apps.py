@@ -1,6 +1,13 @@
 import json
 
+from pydoover.models.control import Application
+from pydoover.models.control._base import _MODEL_REGISTRY
+
 from doover_cli.utils.apps import LocalApplication, get_app_config
+
+
+def test_local_application_does_not_replace_control_application_registry():
+    assert _MODEL_REGISTRY["Application"] is Application
 
 
 def test_get_app_config_returns_local_application_and_resolves_paths(tmp_path):
