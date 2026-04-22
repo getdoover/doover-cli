@@ -5,7 +5,13 @@ from typing import TYPE_CHECKING, Any, ContextManager
 import typer
 from pydoover.models.control import ControlModel, ControlPage
 
-from ._base import RendererBase, EmptyEnterable, TreeNode, normalize_render_data
+from ._base import (
+    EmptyEnterable,
+    RendererBase,
+    TreeNode,
+    format_tree_label,
+    normalize_render_data,
+)
 from ..utils import parsers
 from ..utils.crud import parse_optional_bool
 
@@ -145,10 +151,11 @@ class BasicRenderer(RendererBase):
         depth: int = 0,
         is_root: bool = True,
     ) -> None:
+        label = format_tree_label(node.element)
         if is_root:
-            print(node.label)
+            print(label)
         else:
-            print(f"{'  ' * depth}- {node.label}")
+            print(f"{'  ' * depth}- {label}")
 
         for child in node.children:
             self._print_tree(child, depth=depth + (0 if is_root else 1), is_root=False)

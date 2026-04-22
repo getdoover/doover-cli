@@ -3,10 +3,24 @@ from types import SimpleNamespace
 from rich.console import Console
 from rich.text import Text
 
+from doover_cli.colours import (
+    DEVICE_COLOUR,
+    ENTITY_COLOURS,
+    GROUP_COLOUR,
+    ORGANISATION_COLOUR,
+)
 from doover_cli.renderer._base import TreeNode
 from doover_cli.renderer._default import DefaultRenderer
 from doover_cli.utils.crud import Field, LookupChoice
-from pydoover.models.control import DeviceType, Organisation, Solution
+from pydoover.models.control import (
+    Agent,
+    Agents,
+    Device,
+    DeviceType,
+    Group,
+    Organisation,
+    Solution,
+)
 from pydoover.models.control._base import ControlField, ControlModel, ControlPage
 
 
@@ -77,6 +91,66 @@ def test_render_list_omits_columns_that_do_not_fit_terminal_width():
     assert "Omitted: beta" in output
 
 
+def test_render_single_record_shows_every_field_vertically():
+    console = Console(record=True, width=40)
+    renderer = DefaultRenderer(console=console)
+
+    renderer.render(
+        ExampleModel(
+            alpha="A",
+            beta="B",
+            gamma="G",
+            omega="O",
+        )
+    )
+
+    output = console.export_text()
+    # All four fields must appear — no "Showing N of M columns" truncation
+    # like the horizontal list view produces at this width.
+    for field_name in ("gamma", "alpha", "omega", "beta"):
+        assert field_name in output, f"{field_name} missing from detail output"
+    assert "Showing" not in output
+    assert "Omitted" not in output
+
+    # Each field should be on its own line (vertical layout).
+    lines = [line for line in output.splitlines() if line.strip()]
+    gamma_line = next(line for line in lines if "gamma" in line)
+    alpha_line = next(line for line in lines if "alpha" in line)
+    assert "alpha" not in gamma_line
+    assert "gamma" not in alpha_line
+
+    # Field order from _field_defs is preserved top to bottom.
+    order = [lines.index(next(line for line in lines if name in line))
+             for name in ("gamma", "alpha", "omega", "beta")]
+    assert order == sorted(order)
+
+
+def test_render_single_record_pretty_prints_nested_dicts():
+    class WithNested(ControlModel):
+        _model_name = "WithNested"
+        _field_defs = {
+            "id": ControlField(type="string", nullable=True),
+            "config": ControlField(type="json", nullable=True),
+        }
+
+    console = Console(record=True, width=120)
+    renderer = DefaultRenderer(console=console)
+
+    renderer.render(
+        WithNested(
+            id="42",
+            config={"version": "1.2.3", "tier": "prod"},
+        )
+    )
+
+    output = console.export_text()
+    # Pretty-printed JSON uses multiple lines with indentation.
+    assert '"version": "1.2.3"' in output
+    assert '"tier": "prod"' in output
+    # Outer field name has no JSON syntax wrapping it.
+    assert "config" in output
+
+
 def test_render_formats_resource_values_prettily():
     console = Console(record=True, width=120)
     renderer = DefaultRenderer(console=console)
@@ -98,15 +172,73 @@ def test_render_formats_resource_values_prettily():
     assert "Solution:" not in output
 
 
-def test_render_resource_value_uses_bold_blue_text():
+def test_render_resource_value_colours_by_entity_type():
     renderer = DefaultRenderer(console=Console(record=True, width=120))
-    organisation = Organisation(id=1, name="Acme Farms")
 
-    rendered = renderer._render_value(organisation)
+    organisation = renderer._render_value(Organisation(id=1, name="Acme Farms"))
+    group = renderer._render_value(Group(id=2, name="Field Ops"))
+    device = renderer._render_value(Device(id=3, name="Pump", archived=False))
+    archived_device = renderer._render_value(Device(id=4, name="Old Pump", archived=True))
 
-    assert isinstance(rendered, Text)
-    assert rendered.plain == "Acme Farms"
-    assert str(rendered.style) == "bold blue"
+    assert isinstance(organisation, Text)
+    assert str(organisation.style) == ORGANISATION_COLOUR
+    assert str(group.style) == GROUP_COLOUR
+    assert str(device.style) == DEVICE_COLOUR
+    assert str(archived_device.style) == "dim " + DEVICE_COLOUR
+
+
+def test_render_detail_colours_raw_values_by_field_key():
+    class MixedRecord(ControlModel):
+        _model_name = "MixedRecord"
+        _field_defs = {
+            "id": ControlField(type="string", nullable=True),
+            "organisation": ControlField(type="string", nullable=True),
+            "group": ControlField(type="string", nullable=True),
+            "device": ControlField(type="string", nullable=True),
+            "application": ControlField(type="string", nullable=True),
+            "notes": ControlField(type="string", nullable=True),
+        }
+
+    renderer = DefaultRenderer(console=Console(record=True, width=120))
+    record = MixedRecord(
+        id="42",
+        organisation="Acme",
+        group="Field Ops",
+        device="Pump-01",
+        application="Platform Interface",
+        notes="just some notes",
+    )
+
+    # id (not an entity) — no colouring
+    assert renderer._render_detail_value("42", key="id") == "42"
+    # notes (not in ENTITY_COLOURS) — no colouring
+    assert renderer._render_detail_value("just some notes", key="notes") == (
+        "just some notes"
+    )
+
+    # Entity-keyed fields — styled per ENTITY_COLOURS
+    org_value = renderer._render_detail_value("Acme", key="organisation")
+    group_value = renderer._render_detail_value("Field Ops", key="group")
+    device_value = renderer._render_detail_value("Pump-01", key="device")
+    application_value = renderer._render_detail_value(
+        "Platform Interface", key="application"
+    )
+
+    assert isinstance(org_value, Text)
+    assert str(org_value.style) == ORGANISATION_COLOUR
+    assert str(group_value.style) == GROUP_COLOUR
+    assert str(device_value.style) == DEVICE_COLOUR
+    assert str(application_value.style) == ENTITY_COLOURS["application"]
+
+    # End-to-end: render the record and verify styles are applied in output.
+    console = Console(record=True, width=120, force_terminal=True)
+    DefaultRenderer(console=console).render(record)
+    ansi = console.export_text(styles=True)
+    # Rich uses SGR 33 for yellow, 31 for red, 32 for green, 34 for blue
+    assert "\x1b[33m" in ansi  # organisation
+    assert "\x1b[31m" in ansi  # group
+    assert "\x1b[32m" in ansi  # device
+    assert "\x1b[34m" in ansi  # application
 
 
 def test_tree_renders_rich_tree():
@@ -115,14 +247,18 @@ def test_tree_renders_rich_tree():
 
     renderer.tree(
         TreeNode(
-            "Agents",
+            Agents(),
             children=[
                 TreeNode(
-                    "Operations",
+                    Group(name="Operations"),
                     children=[
                         TreeNode(
-                            "Pump Controller (42)",
-                            children=[TreeNode("type: device")],
+                            Agent(
+                                id=42,
+                                name="pump-controller",
+                                display_name="Pump Controller",
+                                type="device",
+                            ),
                         )
                     ],
                 )
@@ -133,16 +269,37 @@ def test_tree_renders_rich_tree():
     output = console.export_text()
     assert "Agents" in output
     assert "Operations" in output
-    assert "Pump Controller (42)" in output
-    assert "type: device" in output
+    assert "Pump Controller (pump-controller | 42) device" in output
 
 
 def test_tree_label_style_renders_as_text():
-    rendered = DefaultRenderer._render_tree_label(TreeNode("Pump", style="green"))
+    rendered = DefaultRenderer._render_tree_label(
+        TreeNode(Device(id=42, name="Pump", archived=False))
+    )
 
     assert isinstance(rendered, Text)
     assert rendered.plain == "Pump"
-    assert str(rendered.style) == "green"
+    assert str(rendered.style) == DEVICE_COLOUR
+
+
+def test_tree_label_dims_archived_device():
+    rendered = DefaultRenderer._render_tree_label(
+        TreeNode(Device(id=42, name="Pump", archived=True))
+    )
+
+    assert isinstance(rendered, Text)
+    assert str(rendered.style) == "dim " + DEVICE_COLOUR
+
+
+def test_tree_label_plain_for_agents_root_and_non_device_agents():
+    root = DefaultRenderer._render_tree_label(TreeNode(Agents()))
+    assert root == "Agents"
+
+    service_agent = DefaultRenderer._render_tree_label(
+        TreeNode(Agent(id=1, name="svc", display_name="Service", type="service"))
+    )
+    # Non-device agents aren't styled — plain string comes back.
+    assert service_agent == "Service (1)"
 
 
 class FakeQuestion:

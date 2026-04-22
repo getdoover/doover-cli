@@ -7,7 +7,6 @@ import typer
 from pydoover.models.control import Agent, Agents, Group
 from typer import Typer
 
-from .colours import ARCHIVED_DEVICE_COLOUR, ENTITY_COLOURS
 from .renderer import TreeNode
 from .renderer._base import normalize_render_data
 from .utils.api import ProfileAnnotation
@@ -61,7 +60,7 @@ def build_agents_tree(response: Agents) -> TreeNode:
     group_entries = _flatten_groups(response.groups or [])
     groups = [group for group, _parent_id in group_entries]
     agents = list(response.agents or [])
-    root = TreeNode("Agents")
+    root = TreeNode(response)
     groups_by_id = {
         group_id: group
         for group in groups
@@ -103,29 +102,27 @@ def build_agents_tree(response: Agents) -> TreeNode:
     for group_name in sorted(name for name in agents_by_unknown_group if name):
         root.children.append(
             TreeNode(
-                group_name,
+                Group(name=group_name),
                 children=[
-                    _build_agent_node(agent)
+                    TreeNode(agent)
                     for agent in agents_by_unknown_group[group_name]
                 ],
-                style=ENTITY_COLOURS["group"],
             )
         )
 
     if "" in agents_by_unknown_group:
         root.children.append(
             TreeNode(
-                "Ungrouped",
+                Group(name="Ungrouped"),
                 children=[
-                    _build_agent_node(agent) for agent in agents_by_unknown_group[""]
+                    TreeNode(agent) for agent in agents_by_unknown_group[""]
                 ],
-                style=ENTITY_COLOURS["group"],
             )
         )
 
     if not root.children and agents:
         root.children.extend(
-            _build_agent_node(agent) for agent in sorted(agents, key=_agent_sort_key)
+            TreeNode(agent) for agent in sorted(agents, key=_agent_sort_key)
         )
 
     return root
@@ -164,88 +161,9 @@ def _build_group_branch(
     ]
     if group_id is not None:
         children.extend(
-            _build_agent_node(agent) for agent in agents_by_group_id.get(group_id, [])
+            TreeNode(agent) for agent in agents_by_group_id.get(group_id, [])
         )
-    return TreeNode(_group_label(group), children=children, style=ENTITY_COLOURS["group"])
-
-
-def _build_agent_node(agent: Agent) -> TreeNode:
-    if _is_device_agent(agent):
-        return TreeNode(
-            _format_device_label(agent),
-            style=(
-                ARCHIVED_DEVICE_COLOUR
-                if _field_value(agent, "archived", False)
-                else ENTITY_COLOURS["device"]
-            ),
-        )
-
-    label = str(
-        _field_value(agent, "display_name")
-        or _field_value(agent, "name")
-        or _field_value(agent, "id", "Agent")
-    )
-    agent_id = _field_value(agent, "id")
-    if agent_id is not None:
-        label = f"{label} ({agent_id})"
-
-    return TreeNode(
-        label,
-        children=[
-            _value_to_tree_node(key, value) for key, value in _agent_fields(agent).items()
-        ],
-    )
-
-
-def _format_device_label(agent: Agent) -> str:
-    display_name = str(
-        _field_value(agent, "display_name")
-        or _field_value(agent, "name")
-        or _field_value(agent, "id", "Device")
-    )
-    name = str(_field_value(agent, "name", "") or "")
-    agent_id = str(_field_value(agent, "id", "") or "")
-    agent_type = "device" if _agent_type(agent) == "dict" else _agent_type(agent)
-    archived = " (Archived)" if _field_value(agent, "archived", False) else ""
-    return f"{display_name} ({name} | {agent_id}) {agent_type}{archived}"
-
-
-def _agent_fields(agent: Agent) -> dict[str, Any]:
-    normalized = normalize_render_data(agent)
-    if not isinstance(normalized, dict):
-        return {"value": normalized}
-
-    ordered: dict[str, Any] = {}
-    for field_name in getattr(agent, "_field_defs", {}):
-        if field_name in normalized:
-            ordered[field_name] = normalized[field_name]
-    for key, value in normalized.items():
-        if key not in ordered:
-            ordered[key] = value
-    return ordered
-
-
-def _value_to_tree_node(key: str, value: Any) -> TreeNode:
-    style = ENTITY_COLOURS["organisation"] if key == "organisation" else None
-    if isinstance(value, dict):
-        return TreeNode(
-            key,
-            children=[
-                _value_to_tree_node(child_key, child_value)
-                for child_key, child_value in value.items()
-            ],
-            style=style,
-        )
-    if isinstance(value, list):
-        return TreeNode(
-            key,
-            children=[
-                _value_to_tree_node(f"[{index}]", item)
-                for index, item in enumerate(value)
-            ],
-            style=style,
-        )
-    return TreeNode(f"{key}: {value}", style=style)
+    return TreeNode(group, children=children)
 
 
 def _group_agents(
@@ -307,14 +225,6 @@ def _coerce_int(value: Any) -> int | None:
 
 def _group_label(group: Group) -> str:
     return str(_field_value(group, "name") or _field_value(group, "id") or "Unnamed")
-
-
-def _agent_type(agent: Agent) -> str:
-    return str(_field_value(agent, "type", "") or "device")
-
-
-def _is_device_agent(agent: Agent) -> bool:
-    return _agent_type(agent) in {"device", "dict"}
 
 
 def _group_sort_key(group: Group) -> tuple[str, int]:

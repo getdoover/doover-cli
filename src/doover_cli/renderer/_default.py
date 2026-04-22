@@ -6,16 +6,59 @@ from typing import Any
 
 import questionary
 import typer
-from pydoover.models.control import ControlModel, ControlPage
+from pydoover.models.control import Agent, Agents, ControlModel, ControlPage
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 
-from ._base import RendererBase, TreeNode, normalize_render_data
+from ._base import RendererBase, TreeNode, format_tree_label, normalize_render_data
+from ..colours import ENTITY_COLOURS
 from ..utils import parsers
 from ..utils.crud import parse_optional_bool
 from ..utils.crud.lookup import resolve_resource_lookup
+
+
+_RESOURCE_DEFAULT_STYLE = "bold blue"
+
+
+def _style_for_resource(value: ControlModel) -> str:
+    """Pick a colour for a ControlModel value based on its entity type."""
+    model_name = getattr(value, "_model_name", None) or type(value).__name__
+    style = ENTITY_COLOURS.get(model_name.lower(), _RESOURCE_DEFAULT_STYLE)
+    if getattr(value, "archived", False):
+        return "dim " + style
+    return style
+
+def _style_for_key(key: str | None) -> str | None:
+    """Pick a colour for a raw (non-ControlModel) value based on its field key."""
+    if key is None:
+        return None
+    return ENTITY_COLOURS.get(key)
+
+
+def _style_for_tree_node(element: ControlModel) -> str | None:
+    """Pick a colour for a TreeNode based on its element's entity type.
+
+    Unlike ``_style_for_resource``, tree nodes don't fall back to a default
+    style — the root ``Agents`` container and non-device ``Agent``s render
+    plain. Archived elements get a ``"dim "`` prefix.
+    """
+    if isinstance(element, Agents):
+        return None
+    if isinstance(element, Agent):
+        agent_type = getattr(element, "type", None) or "device"
+        if agent_type not in {"device", "dict"}:
+            return None
+        style = ENTITY_COLOURS["device"]
+    else:
+        model_name = getattr(element, "_model_name", None) or type(element).__name__
+        style = ENTITY_COLOURS.get(model_name.lower())
+        if style is None:
+            return None
+    if getattr(element, "archived", False):
+        return "dim " + style
+    return style
 
 
 class DefaultRenderer(RendererBase):
@@ -44,7 +87,7 @@ class DefaultRenderer(RendererBase):
         self._render_rows(rows, caption=caption)
 
     def render(self, data: dict[str, Any] | ControlModel) -> None:
-        self._render_rows([data])
+        self._render_detail(data)
 
     def tree(self, data: TreeNode) -> None:
         tree = Tree(self._render_tree_label(data))
@@ -74,6 +117,84 @@ class DefaultRenderer(RendererBase):
             caption=self._build_caption(caption, omitted_columns, len(columns)),
         )
         self.console.print(table)
+
+    def _render_detail(self, data: dict[str, Any] | ControlModel) -> None:
+        """Render a single record as a vertical field/value list.
+
+        Unlike ``_render_rows`` (which lays out records as horizontal table
+        rows and may omit columns that do not fit the terminal width), this
+        shows every field on its own line so nothing is hidden.
+        """
+        row = self._normalize_row(data)
+        if not row:
+            self.console.print_json(json.dumps(normalize_render_data(data), indent=4))
+            return
+
+        ordered_keys = self._ordered_detail_keys(data, row)
+
+        table = Table(
+            show_header=False,
+            box=None,
+            pad_edge=False,
+            padding=(0, 2),
+        )
+        table.add_column(no_wrap=True)
+        table.add_column(overflow="fold")
+
+        for key in ordered_keys:
+            table.add_row(key, self._render_detail_value(row.get(key), key=key))
+
+        self.console.print(table)
+
+    @staticmethod
+    def _ordered_detail_keys(
+        data: dict[str, Any] | ControlModel,
+        row: dict[str, Any],
+    ) -> list[str]:
+        if isinstance(data, ControlModel):
+            ordered = [name for name in data._field_defs if name in row]
+            for key in row:
+                if key not in ordered:
+                    ordered.append(key)
+            return ordered
+        return list(row.keys())
+
+    def _render_detail_value(self, value: Any, *, key: str | None = None) -> str | Text:
+        """Like ``_render_value`` but pretty-prints nested data.
+
+        In the single-record detail view we have unlimited vertical space,
+        so structured values (dicts, lists of dicts) are rendered as
+        indented JSON instead of being compacted onto one line.
+
+        Values are coloured by entity type (per ``colours.py``) when the
+        value is a recognised ControlModel or when ``key`` names a known
+        entity (``organisation``, ``group``, ``device``).
+        """
+        if value is None:
+            return ""
+        if isinstance(value, ControlModel):
+            return self._render_resource(value)
+        style = _style_for_key(key)
+        if isinstance(value, list):
+            if not value:
+                return ""
+            if any(isinstance(item, (dict, list)) for item in value):
+                rendered = json.dumps(
+                    normalize_render_data(value),
+                    indent=2,
+                    ensure_ascii=True,
+                    default=str,
+                )
+                return Text(rendered, style=style) if style else rendered
+            rendered_list = self._render_list(value)
+            if style and isinstance(rendered_list, str):
+                return Text(rendered_list, style=style)
+            return rendered_list
+        if isinstance(value, dict):
+            rendered = json.dumps(value, indent=2, ensure_ascii=True, default=str)
+            return Text(rendered, style=style) if style else rendered
+        text = str(value)
+        return Text(text, style=style) if style else text
 
     def _normalize_row(self, item: Any) -> dict[str, Any]:
         if isinstance(item, ControlModel):
@@ -206,7 +327,7 @@ class DefaultRenderer(RendererBase):
         if value is None:
             return ""
         if isinstance(value, ControlModel):
-            return self._resource_label(value) or str(getattr(value, "id", "") or "")
+            return self._resource_display(value)
         if isinstance(value, list):
             return ", ".join(self._plain_text_value(item) for item in value)
         if isinstance(value, dict):
@@ -214,13 +335,23 @@ class DefaultRenderer(RendererBase):
         return str(value)
 
     def _render_resource(self, value: ControlModel) -> Text:
+        return Text(self._resource_display(value), style=_style_for_resource(value))
+
+    def _resource_display(self, value: ControlModel) -> str:
+        """Format a resource as ``<display_name or name> (<id>)``.
+
+        Falls back to just the label or just the id when one is missing,
+        and finally to the model name if neither is available.
+        """
         label = self._resource_label(value)
-        if not label:
-            label = str(
-                getattr(value, "id", "")
-                or (getattr(value, "_model_name", None) or type(value).__name__)
-            )
-        return Text(label, style="bold blue")
+        resource_id = getattr(value, "id", None)
+        if label and resource_id is not None:
+            return f"{label} ({resource_id})"
+        if label:
+            return label
+        if resource_id is not None:
+            return str(resource_id)
+        return getattr(value, "_model_name", None) or type(value).__name__
 
     def _render_list(self, value: list[Any]) -> str | Text:
         if any(isinstance(item, ControlModel) for item in value):
@@ -396,6 +527,8 @@ class DefaultRenderer(RendererBase):
 
     @staticmethod
     def _render_tree_label(node: TreeNode) -> str | Text:
-        if node.style:
-            return Text(node.label, style=node.style)
-        return node.label
+        label = format_tree_label(node.element)
+        style = _style_for_tree_node(node.element)
+        if style:
+            return Text(label, style=style)
+        return label
