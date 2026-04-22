@@ -26,6 +26,12 @@ class ExampleValueModel(ControlModel):
         "enabled": ControlField(type="boolean", nullable=True),
         "config": ControlField(type="json", nullable=True),
         "installer": ControlField(type="string", nullable=True),
+        "config_profiles": ControlField(
+            type="resource",
+            ref="ApplicationConfigProfile",
+            nullable=True,
+            is_array=True,
+        ),
     }
     _versions = {
         "ExampleValueRequest": {
@@ -37,6 +43,10 @@ class ExampleValueModel(ControlModel):
                 "enabled": {"required": False},
                 "config": {"required": False},
                 "installer": {"required": False},
+                "config_profiles": {
+                    "required": False,
+                    "output_id": "config_profile_ids",
+                },
             },
         }
     }
@@ -66,6 +76,12 @@ def test_coerce_cli_value_handles_json_integer_boolean_resource_and_paths(tmp_pa
     assert coerce_cli_value(specs["solution"], {"id": 9}) == 9
     assert coerce_cli_value(specs["solution"], SimpleNamespace(id=11)) == 11
     assert coerce_cli_value(specs["installer"], str(installer)) == installer
+    assert coerce_cli_value(specs["config_profiles"], "1,2,3") == [1, 2, 3]
+    assert coerce_cli_value(specs["config_profiles"], "[4,5]") == [4, 5]
+    assert coerce_cli_value(
+        specs["config_profiles"],
+        [{"id": 6}, SimpleNamespace(id=7)],
+    ) == [6, 7]
 
 
 def test_normalize_extract_and_build_payload_use_output_ids(tmp_path):
@@ -78,6 +94,7 @@ def test_normalize_extract_and_build_payload_use_output_ids(tmp_path):
             "solution": "5",
             "config": '{"mode":"auto"}',
             "installer": str(installer),
+            "config_profiles": "1,2",
         },
     )
 
@@ -86,6 +103,7 @@ def test_normalize_extract_and_build_payload_use_output_ids(tmp_path):
         "solution": 5,
         "config": {"mode": "auto"},
         "installer": installer,
+        "config_profiles": [1, 2],
     }
 
     extracted = extract_model_values(
@@ -102,6 +120,7 @@ def test_normalize_extract_and_build_payload_use_output_ids(tmp_path):
     payload = build_request_payload(ExampleValueModel, "POST", normalized)
     assert payload["solution_id"] == 5
     assert payload["installer"] == installer
+    assert payload["config_profile_ids"] == [1, 2]
 
 
 def test_collect_changed_model_values_handles_paths_and_only_returns_changes(tmp_path):

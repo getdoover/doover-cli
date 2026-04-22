@@ -3,7 +3,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import get_args
 
-from pydoover.models.control import Device, DeviceType, Group, Location, Solution
+from pydoover.models.control import (
+    ApplicationInstallation,
+    Device,
+    DeviceType,
+    Group,
+    Location,
+    Solution,
+)
 
 from doover_cli.utils.crud.commands import (
     build_create_command,
@@ -48,6 +55,19 @@ def test_create_callback_signature_includes_generated_options():
 
     installer_annotation = signature.parameters["installer"].annotation
     assert get_args(installer_annotation)[0] == Path | None
+
+
+def test_create_callback_signature_handles_array_resource_options():
+    callback = build_create_command(
+        model_cls=ApplicationInstallation,
+        command_help="Create an app install.",
+        get_state=lambda: (None, None),
+    )
+
+    signature = callback.__signature__
+    assert "config_profiles" in signature.parameters
+    annotation = signature.parameters["config_profiles"].annotation
+    assert get_args(annotation)[0] == list[int] | None
 
 
 def test_update_callback_signature_includes_resource_id_argument():

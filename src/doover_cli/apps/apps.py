@@ -42,6 +42,7 @@ from ..utils.prompt import QuestionaryPromptCommand
 from ..utils.shell_commands import run as shell_run
 from ..utils.sentry import capture_handled_exception
 from ..utils.state import state
+from .app_install import application_app as installs_app
 
 if TYPE_CHECKING:
     from pydoover.api import ControlClient
@@ -55,6 +56,11 @@ IP_PATTERN = re.compile(r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$")
 HOSTNAME_PATTERN = re.compile(r"(?P<host>[a-zA-Z0-9_]*)-*(?P<serial>[0-9a-zA-Z]{6})")
 
 app = typer.Typer(no_args_is_help=True)
+app.add_typer(
+    installs_app,
+    name="installs",
+    help="Manage installations for an application.",
+)
 
 
 class AppType(Enum):
@@ -878,9 +884,7 @@ def publish(
     ] = Path(),
     build_container: Annotated[
         bool,
-        typer.Option(
-            help="Build and push the container image to the registry."
-        ),
+        typer.Option(help="Build and push the container image to the registry."),
     ] = False,
     staging: Annotated[
         bool | None,

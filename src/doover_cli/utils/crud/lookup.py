@@ -220,7 +220,7 @@ def resource_autocomplete(
             )
         # Shell completion should fail closed for expected connectivity/session
         # issues, but unexpected errors should still surface during testing.
-        except (ControlClientUnavailableError, RuntimeError, OSError):
+        except (ControlClientUnavailableError, RuntimeError, OSError, KeyError):
             return []
 
         lowered_incomplete = incomplete.casefold().strip()

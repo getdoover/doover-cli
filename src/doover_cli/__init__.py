@@ -7,6 +7,7 @@ import typer
 from pydoover.api.auth import ConfigManager
 
 from .apps.apps import app as apps_app
+from .apps.app_install import app as app_install_app
 from .config_schema import app as config_schema_app
 from .ui_schema import app as ui_schema_app
 from .simulator import app as simulators_app
@@ -20,12 +21,18 @@ from .grpc import app as grpc_app
 from .login import app as login_app
 from .report import app as reports_app
 from .tunnel import app as tunnels_app
+from .user import org_app, users_app
 from .utils import sentry as sentry_utils
 from .utils.state import state
 
 app = typer.Typer(no_args_is_help=True)
 app.add_typer(
     apps_app, name="app", help="Manage applications and their configurations."
+)
+app.add_typer(
+    app_install_app,
+    name="app-install",
+    help="Manage application installations in Doover 2.0.",
 )
 app.add_typer(
     config_schema_app, name="config-schema", help="Manage application config schemas."
@@ -50,6 +57,8 @@ app.add_typer(device_app, name="device", help="Manipulate devices in Doover 2.0"
 app.add_typer(
     device_type_app, name="device-type", help="Manipulate device types in Doover 2.0"
 )
+app.add_typer(org_app, name="org", help="Manage the current organisation.")
+app.add_typer(users_app, name="users", help="Manage users.")
 
 
 def version_callback(value: bool):
