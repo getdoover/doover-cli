@@ -41,6 +41,9 @@ class BasicRenderer(RendererBase):
     def _prompt_field(self, field: "Field") -> Any:
         default = self._stringify_default(field.default)
 
+        if field.kind == "json":
+            return self._prompt_json_field(field)
+
         if field.kind == "bool":
             if field.required:
                 return typer.confirm(
@@ -58,6 +61,37 @@ class BasicRenderer(RendererBase):
         answer = typer.prompt(field.label, default=default, show_default=bool(default))
         return self._coerce_field_value(field, answer)
 
+    def _prompt_json_field(self, field: "Field") -> Any:
+        if field.default is None and not field.required:
+            if not typer.confirm(f"{field.label}: configure JSON value?", default=False):
+                return None
+
+        while True:
+            edited = typer.edit(
+                self._build_json_editor_seed(field),
+                extension=".json",
+                require_save=False,
+            )
+            if edited is None:
+                if field.default is not None:
+                    return field.default
+                if field.required:
+                    print(f"{field.label} is required.")
+                    continue
+                return None
+
+            stripped = edited.strip()
+            if not stripped:
+                if field.required:
+                    print(f"{field.label} is required.")
+                    continue
+                return None
+
+            try:
+                return parsers.parse_json(stripped)
+            except json.JSONDecodeError as exc:
+                print(f"Invalid JSON for {field.label}: {exc}")
+
     @staticmethod
     def _stringify_default(value: Any) -> str:
         if value is None:
@@ -71,6 +105,18 @@ class BasicRenderer(RendererBase):
             return str(value_id)
         return str(value)
 
+    @classmethod
+    def _build_json_editor_seed(cls, field: "Field") -> str:
+        seed = field.default if field.default is not None else field.json_template
+        if seed is None:
+            return ""
+        if isinstance(seed, str):
+            try:
+                seed = parsers.parse_json(seed)
+            except json.JSONDecodeError:
+                return seed
+        return json.dumps(seed, indent=2, ensure_ascii=True) + "\n"
+
     def _coerce_field_value(self, field: "Field", answer: str) -> Any:
         stripped = answer.strip()
         if not stripped:
@@ -83,7 +129,7 @@ class BasicRenderer(RendererBase):
                 raise typer.BadParameter(f"Please enter a valid {field.label.lower()}.")
             return int(stripped)
         if field.kind == "json":
-            return parsers.maybe_json(stripped)
+            return parsers.parse_json(stripped)
         if field.kind == "path":
             return Path(stripped)
         if field.kind == "resource":

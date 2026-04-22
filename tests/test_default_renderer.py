@@ -153,24 +153,92 @@ class FakeQuestion:
         return self.answer
 
 
-def test_prompt_fields_uses_text_prompt_for_json(monkeypatch):
+def test_prompt_fields_opens_editor_for_existing_json(monkeypatch):
     renderer = DefaultRenderer(console=Console(record=True, width=120))
     captured = {}
 
-    def fake_text(message, default=None, validate=None):
-        captured["message"] = message
-        captured["default"] = default
-        assert validate is not None
-        assert validate('{"mode":"auto"}') is True
-        return FakeQuestion('{"mode":"auto"}')
+    def fake_edit(text, extension=None, require_save=None):
+        captured["text"] = text
+        captured["extension"] = extension
+        captured["require_save"] = require_save
+        return '{\n  "mode": "auto"\n}\n'
 
-    monkeypatch.setattr("doover_cli.renderer._default.questionary.text", fake_text)
+    monkeypatch.setattr("doover_cli.renderer._default.typer.edit", fake_edit)
 
     values = renderer.prompt_fields(
-        [Field(key="config", label="Config", kind="json", required=False, default=None)]
+        [
+            Field(
+                key="config",
+                label="Config",
+                kind="json",
+                required=False,
+                default={"mode": "manual"},
+            )
+        ]
     )
 
-    assert captured == {"message": "Config", "default": ""}
+    assert captured == {
+        "text": '{\n  "mode": "manual"\n}\n',
+        "extension": ".json",
+        "require_save": False,
+    }
+    assert values == {"config": {"mode": "auto"}}
+
+
+def test_prompt_fields_skips_optional_json_when_not_configuring(monkeypatch):
+    renderer = DefaultRenderer(console=Console(record=True, width=120))
+
+    def fake_confirm(message, default=None):
+        assert message == "Config: configure JSON value?"
+        assert default is False
+        return FakeQuestion(False)
+
+    monkeypatch.setattr("doover_cli.renderer._default.questionary.confirm", fake_confirm)
+
+    values = renderer.prompt_fields(
+        [
+            Field(
+                key="config",
+                label="Config",
+                kind="json",
+                required=False,
+                default=None,
+                json_template={},
+            )
+        ]
+    )
+
+    assert values == {"config": None}
+
+
+def test_prompt_fields_seeds_optional_json_editor_from_template(monkeypatch):
+    renderer = DefaultRenderer(console=Console(record=True, width=120))
+    captured = {}
+
+    def fake_confirm(message, default=None):
+        return FakeQuestion(True)
+
+    def fake_edit(text, extension=None, require_save=None):
+        captured["text"] = text
+        return '{\n  "mode": "auto"\n}\n'
+
+    monkeypatch.setattr("doover_cli.renderer._default.questionary.confirm", fake_confirm)
+    monkeypatch.setattr("doover_cli.renderer._default.typer.edit", fake_edit)
+
+    values = renderer.prompt_fields(
+        [
+            Field(
+                key="config",
+                label="Config",
+                kind="json",
+                required=False,
+                default=None,
+                json_template={},
+            )
+        ]
+    )
+
+    assert captured["text"] == "{}\n"
     assert values == {"config": {"mode": "auto"}}
 
 

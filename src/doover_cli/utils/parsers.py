@@ -13,6 +13,13 @@ def task_name(name: str) -> str:
 
 def maybe_json(data: str):
     try:
+        return parse_json(data)
+    except json.JSONDecodeError:
+        return data
+
+
+def parse_json(data: str):
+    try:
         return json.loads(data)
     except json.JSONDecodeError:
         pass
@@ -23,9 +30,9 @@ def maybe_json(data: str):
         and num_occ % 2 == 0
         and len([n for n in data if n == "{"]) == len([n for n in data if n == "}"])
     ):
-        return maybe_json(data.replace("'", '"'))
+        return parse_json(data.replace("'", '"'))
 
-    return data
+    return json.loads(data)
 
 
 def int_or_list(data: str):

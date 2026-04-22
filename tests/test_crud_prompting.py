@@ -120,6 +120,7 @@ def test_build_prompt_field_for_spec_sets_installer_and_resource_details():
             field_values={"display_name": "Field Ops", "name": None},
         )
     ]
+    assert build_prompt_field_for_spec(client, specs["config"], None).json_template == {}
 
 
 def test_build_prompt_field_for_resource_falls_back_when_choices_fail():
@@ -240,3 +241,15 @@ def test_normalize_prompted_value_normalizes_location_json():
         field,
         '{"latitude": 1.5, "longitude": 2.5}',
     ) == {"latitude": 1.5, "longitude": 2.5}
+
+
+def test_build_prompt_field_for_location_sets_location_template():
+    spec = next(
+        spec
+        for spec in get_model_field_specs(Device, "POST")
+        if spec.name == "fixed_location"
+    )
+
+    field = build_prompt_field_for_spec(FakeControlClient(), spec, None)
+
+    assert field.json_template == {"latitude": None, "longitude": None}
