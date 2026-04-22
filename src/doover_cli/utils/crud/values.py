@@ -31,7 +31,7 @@ def _coerce_location_number(spec: ModelVersionFieldSpec, key: str, value: Any) -
             return None
         try:
             return float(stripped)
-        except ValueError as exc:
+        except ValueError:
             _raise_location_error(spec, f"must use numeric {key} values.")
     _raise_location_error(spec, f"must use numeric {key} values.")
 
