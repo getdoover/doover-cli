@@ -108,6 +108,21 @@ def _fake_state(monkeypatch, renderer=None, client=None):
             app_installs.calls.append(("applications.installs_list", kwargs))
             return {"results": []}
 
+        def retrieve(self, application_id):
+            return SimpleNamespace(
+                id=int(application_id),
+                display_name="Tracker App",
+                name="tracker-app",
+                config_schema={
+                    "type": "object",
+                    "properties": {
+                        "mode": {"type": "string", "title": "Mode"},
+                        "retries": {"type": "integer"},
+                        "enabled": {"type": "boolean"},
+                    },
+                },
+            )
+
     class FakeDevicesClient:
         def app_installs_list(self, **kwargs):
             app_installs.calls.append(("devices.app_installs_list", kwargs))
@@ -338,7 +353,9 @@ def test_app_install_create_builds_payload(monkeypatch):
     assert renderer.render_calls[0]["id"] == 55
 
 
-def test_app_install_create_prompts_when_required_fields_missing(monkeypatch):
+def test_app_install_create_with_no_schema_prompts_when_required_fields_missing(
+    monkeypatch,
+):
     renderer = FakeRenderer(
         {
             "display_name": "Prompted Tracker",
@@ -352,7 +369,7 @@ def test_app_install_create_prompts_when_required_fields_missing(monkeypatch):
     )
     _, _, app_installs = _fake_state(monkeypatch, renderer=renderer)
 
-    result = runner.invoke(app, ["app-install", "create"])
+    result = runner.invoke(app, ["app-install", "create", "--no-schema"])
 
     assert result.exit_code == 0
     prompted_fields = renderer.prompt_fields_calls[0]
@@ -397,6 +414,53 @@ def test_app_install_create_prompts_when_required_fields_missing(monkeypatch):
     assert app_installs.calls[0][1]["deployment_config"] == {"mode": "manual"}
     assert app_installs.calls[0][1]["config_profile_ids"] == [31, 32]
     assert app_installs.calls[0][1]["solution_id"] == 44
+
+
+def test_app_install_create_prompts_deployment_config_from_app_schema_by_default(
+    monkeypatch,
+):
+    renderer = FakeRenderer(
+        {
+            "mode": "manual",
+            "retries": "3",
+            "enabled": True,
+        }
+    )
+    _, _, app_installs = _fake_state(monkeypatch, renderer=renderer)
+
+    result = runner.invoke(
+        app,
+        [
+            "app-install",
+            "create",
+            "--display-name",
+            "Tracker",
+            "--application",
+            "17",
+            "--device",
+            "23",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert [field.key for field in renderer.prompt_fields_calls[0]] == [
+        "mode",
+        "retries",
+        "enabled",
+    ]
+    assert app_installs.calls[0] == (
+        "create",
+        {
+            "display_name": "Tracker",
+            "application_id": 17,
+            "device_id": 23,
+            "deployment_config": {
+                "mode": "manual",
+                "retries": 3,
+                "enabled": True,
+            },
+        },
+    )
 
 
 def test_app_install_create_falls_back_when_solution_lookup_unavailable(monkeypatch):
@@ -461,7 +525,7 @@ def test_app_install_create_falls_back_when_solution_lookup_unavailable(monkeypa
 
     _fake_state(monkeypatch, renderer=renderer, client=FakeControlClient())
 
-    result = runner.invoke(app, ["device", "app-installs", "create"])
+    result = runner.invoke(app, ["device", "app-installs", "create", "--no-schema"])
 
     assert result.exit_code == 0
     prompted_fields = renderer.prompt_fields_calls[1]
@@ -486,6 +550,7 @@ def test_app_install_update_with_flags_sends_partial_payload(monkeypatch):
             "18",
             "--config-profile-id",
             "40",
+            "--no-schema",
         ],
     )
 
@@ -501,7 +566,7 @@ def test_app_install_update_with_flags_sends_partial_payload(monkeypatch):
     )
 
 
-def test_app_install_update_with_no_flags_prompts_and_submits_changes(monkeypatch):
+def test_app_install_update_with_no_schema_prompts_and_submits_changes(monkeypatch):
     renderer = FakeRenderer(
         {
             "display_name": "Updated Tracker",
@@ -516,7 +581,7 @@ def test_app_install_update_with_no_flags_prompts_and_submits_changes(monkeypatc
     )
     _, _, app_installs = _fake_state(monkeypatch, renderer=renderer)
 
-    result = runner.invoke(app, ["app-install", "update", "55"])
+    result = runner.invoke(app, ["app-install", "update", "55", "--no-schema"])
 
     assert result.exit_code == 0
     assert app_installs.calls[0] == ("retrieve", "55")
@@ -524,6 +589,54 @@ def test_app_install_update_with_no_flags_prompts_and_submits_changes(monkeypatc
         "partial",
         "55",
         {"display_name": "Updated Tracker"},
+    )
+
+
+def test_app_install_update_uses_application_config_schema_by_default(monkeypatch):
+    renderer = FakeRenderer(
+        {
+            "display_name": "Tracker",
+            "name": "tracker",
+            "application": 17,
+            "device": 23,
+            "version": "1.0.0",
+            "config_profile_ids": "31,32",
+            "solution": 44,
+            "mode": "manual",
+            "retries": "5",
+            "enabled": True,
+        }
+    )
+    _, _, app_installs = _fake_state(monkeypatch, renderer=renderer)
+
+    result = runner.invoke(app, ["app-install", "update", "55"])
+
+    assert result.exit_code == 0
+    assert app_installs.calls[0] == ("retrieve", "55")
+    assert [field.key for field in renderer.prompt_fields_calls[0]] == [
+        "name",
+        "display_name",
+        "application",
+        "version",
+        "device",
+        "config_profile_ids",
+        "solution",
+    ]
+    assert [field.key for field in renderer.prompt_fields_calls[1]] == [
+        "mode",
+        "retries",
+        "enabled",
+    ]
+    assert app_installs.calls[1] == (
+        "partial",
+        "55",
+        {
+            "deployment_config": {
+                "mode": "manual",
+                "retries": 5,
+                "enabled": True,
+            }
+        },
     )
 
 

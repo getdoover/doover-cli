@@ -24,6 +24,7 @@ class Field:
     kind: Literal["text", "int", "bool", "json", "path", "resource"]
     required: bool
     default: Any = None
+    json_template: Any = None
     help: str | None = None
     choices: list[Any] | None = None
     resource_model_cls: type[Any] | None = None
@@ -73,6 +74,13 @@ def build_prompt_field_for_spec(
     resource_lookup_choices = None
     resource_model_label = None
     match_middle = False
+    json_template = None
+
+    if kind == "json":
+        if spec.field.type == "Location":
+            json_template = {"latitude": None, "longitude": None}
+        elif default is None:
+            json_template = {}
 
     # Resource fields need lookup choices up front so renderers can validate
     # and autocomplete against the same set of values the command will accept.
@@ -99,6 +107,7 @@ def build_prompt_field_for_spec(
         kind=kind,
         required=spec.required,
         default=default,
+        json_template=json_template,
         resource_model_cls=resource_model_cls,
         resource_model_label=resource_model_label,
         resource_lookup_choices=resource_lookup_choices,

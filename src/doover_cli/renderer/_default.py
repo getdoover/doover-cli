@@ -249,6 +249,9 @@ class DefaultRenderer(RendererBase):
     def _prompt_field(self, field) -> Any:
         default = self._stringify_default(field.default)
 
+        if field.kind == "json":
+            return self._prompt_json_field(field)
+
         if field.kind == "resource" and field.resource_lookup_choices:
             choice_labels = [choice.label for choice in field.resource_lookup_choices]
             default_choice = next(
@@ -279,6 +282,43 @@ class DefaultRenderer(RendererBase):
             raise typer.Abort()
         return self._coerce_field_value(field, answer)
 
+    def _prompt_json_field(self, field) -> Any:
+        if field.default is None and not field.required:
+            configure = questionary.confirm(
+                f"{field.label}: configure JSON value?",
+                default=False,
+            ).unsafe_ask()
+            if configure is None:
+                raise typer.Abort()
+            if not configure:
+                return None
+
+        while True:
+            edited = typer.edit(
+                self._build_json_editor_seed(field),
+                extension=".json",
+                require_save=False,
+            )
+            if edited is None:
+                if field.default is not None:
+                    return field.default
+                if field.required:
+                    self.console.print(f"[red]{field.label} is required.[/red]")
+                    continue
+                return None
+
+            stripped = edited.strip()
+            if not stripped:
+                if field.required:
+                    self.console.print(f"[red]{field.label} is required.[/red]")
+                    continue
+                return None
+
+            try:
+                return parsers.parse_json(stripped)
+            except json.JSONDecodeError as exc:
+                self.console.print(f"[red]Invalid JSON for {field.label}: {exc}[/red]")
+
     @staticmethod
     def _stringify_default(value: Any) -> str:
         if value is None:
@@ -291,6 +331,18 @@ class DefaultRenderer(RendererBase):
         if value_id is not None:
             return str(value_id)
         return str(value)
+
+    @classmethod
+    def _build_json_editor_seed(cls, field) -> str:
+        seed = field.default if field.default is not None else field.json_template
+        if seed is None:
+            return ""
+        if isinstance(seed, str):
+            try:
+                seed = parsers.parse_json(seed)
+            except json.JSONDecodeError:
+                return seed
+        return json.dumps(seed, indent=2, ensure_ascii=True) + "\n"
 
     def _validate_basic_field(self, field, value: str) -> bool | str:
         stripped = value.strip()
@@ -305,8 +357,8 @@ class DefaultRenderer(RendererBase):
                 return str(exc)
         if field.kind == "json":
             try:
-                parsers.maybe_json(stripped)
-            except Exception as exc:
+                parsers.parse_json(stripped)
+            except json.JSONDecodeError as exc:
                 return str(exc)
         return True
 

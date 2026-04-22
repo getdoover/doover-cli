@@ -20,6 +20,7 @@ from ..utils.crud import (
     resource_autocomplete,
 )
 from ..utils.crud.lookup import load_control_model_choices, resolve_resource_lookup
+from ..utils.crud.prompting import humanize_field_name
 from ..utils.state import state
 
 if TYPE_CHECKING:
@@ -379,6 +380,219 @@ def _resource_prompt_field(
     )
 
 
+def _json_schema_types(schema: Any) -> tuple[str, ...]:
+    if not isinstance(schema, dict):
+        return ()
+
+    raw_type = schema.get("type")
+    if isinstance(raw_type, str):
+        return (raw_type,) if raw_type != "null" else ()
+    if isinstance(raw_type, list):
+        return tuple(
+            type_name
+            for type_name in raw_type
+            if isinstance(type_name, str) and type_name != "null"
+        )
+    return ()
+
+
+def _json_schema_template(schema: Any) -> Any:
+    if not isinstance(schema, dict):
+        return None
+    if "default" in schema:
+        return schema["default"]
+
+    schema_types = set(_json_schema_types(schema))
+    if "object" in schema_types:
+        properties = schema.get("properties")
+        if not isinstance(properties, dict):
+            return {}
+        template: dict[str, Any] = {}
+        required_fields = {
+            item for item in schema.get("required", []) if isinstance(item, str)
+        }
+        for key, property_schema in properties.items():
+            child_template = _json_schema_template(property_schema)
+            if child_template is not None or key in required_fields:
+                template[key] = child_template
+        return template
+    if "array" in schema_types:
+        return []
+
+    return None
+
+
+def _build_json_schema_prompt_fields(
+    schema: Any,
+    *,
+    current_value: Any,
+) -> list[Field] | None:
+    if not isinstance(schema, dict):
+        return None
+
+    schema_types = set(_json_schema_types(schema))
+    properties = schema.get("properties")
+    if "object" not in schema_types and not isinstance(properties, dict):
+        return None
+    if not isinstance(properties, dict):
+        return None
+    if current_value is not None and not isinstance(current_value, dict):
+        return None
+
+    required_fields = {
+        item for item in schema.get("required", []) if isinstance(item, str)
+    }
+    fields: list[Field] = []
+    current_object = current_value if isinstance(current_value, dict) else {}
+
+    for key, property_schema in properties.items():
+        property_schema = (
+            property_schema if isinstance(property_schema, dict) else {}
+        )
+        property_types = set(_json_schema_types(property_schema))
+        default = current_object.get(key, property_schema.get("default"))
+        json_template = None
+
+        if "boolean" in property_types:
+            kind = "bool"
+        elif "integer" in property_types:
+            kind = "int"
+        elif "object" in property_types or "array" in property_types:
+            kind = "json"
+            json_template = _json_schema_template(property_schema)
+        else:
+            kind = "text"
+
+        fields.append(
+            Field(
+                key=key,
+                label=property_schema.get("title") or humanize_field_name(key),
+                kind=kind,
+                required=key in required_fields,
+                default=default,
+                json_template=json_template,
+                allow_blank=key not in required_fields,
+            )
+        )
+
+    return fields
+
+
+def _coerce_json_schema_prompt_value(
+    key: str,
+    schema: Any,
+    raw_value: Any,
+) -> Any:
+    if raw_value is None:
+        return None
+    if not isinstance(schema, dict):
+        return raw_value
+
+    schema_types = set(_json_schema_types(schema))
+
+    if "boolean" in schema_types:
+        if isinstance(raw_value, bool):
+            return raw_value
+        return parse_optional_bool(str(raw_value), f"--deployment-config.{key}")
+    if "integer" in schema_types:
+        if isinstance(raw_value, int) and not isinstance(raw_value, bool):
+            return raw_value
+        try:
+            return int(str(raw_value).strip())
+        except ValueError as exc:
+            raise typer.BadParameter(
+                f"--deployment-config.{key} must be an integer.",
+                param_hint="--deployment-config",
+            ) from exc
+    if "number" in schema_types:
+        if isinstance(raw_value, (int, float)) and not isinstance(raw_value, bool):
+            return float(raw_value)
+        try:
+            return float(str(raw_value).strip())
+        except ValueError as exc:
+            raise typer.BadParameter(
+                f"--deployment-config.{key} must be a number.",
+                param_hint="--deployment-config",
+            ) from exc
+    if "object" in schema_types or "array" in schema_types:
+        if isinstance(raw_value, (dict, list)):
+            return raw_value
+        parsed = parsers.maybe_json(str(raw_value))
+        if isinstance(parsed, str):
+            raise typer.BadParameter(
+                f"--deployment-config.{key} must be valid JSON.",
+                param_hint="--deployment-config",
+            )
+        return parsed
+
+    return raw_value
+
+
+def _load_application_config_schema(
+    client: "ControlClient",
+    renderer: "RendererBase",
+    *,
+    application: str | int | None,
+) -> Any:
+    application_id = _resolve_application_id(client, renderer, application)
+    if application_id is None:
+        return None
+
+    with renderer.loading("Loading application config schema..."):
+        application_resource = client.applications.retrieve(str(application_id))
+    return getattr(application_resource, "config_schema", None)
+
+
+def _prompt_deployment_config_value(
+    client: "ControlClient",
+    renderer: "RendererBase",
+    *,
+    application: str | int | None,
+    current_value: Any,
+    use_application_schema: bool,
+) -> Any:
+    if use_application_schema:
+        schema = _load_application_config_schema(
+            client,
+            renderer,
+            application=application,
+        )
+        schema_fields = _build_json_schema_prompt_fields(
+            schema,
+            current_value=current_value,
+        )
+        if schema_fields:
+            prompted = renderer.prompt_fields(schema_fields)
+            deployment_config = (
+                dict(current_value) if isinstance(current_value, dict) else {}
+            )
+            for field in schema_fields:
+                value = _coerce_json_schema_prompt_value(
+                    field.key,
+                    schema.get("properties", {}).get(field.key),
+                    prompted.get(field.key),
+                )
+                if value is None:
+                    deployment_config.pop(field.key, None)
+                    continue
+                deployment_config[field.key] = value
+
+            return deployment_config or None
+
+    prompted = renderer.prompt_fields(
+        [
+            Field(
+                key="deployment_config",
+                label="Deployment config",
+                kind="json",
+                required=False,
+                default=current_value,
+            )
+        ]
+    )
+    return prompted.get("deployment_config")
+
+
 def _prompt_create_values(
     client: "ControlClient",
     renderer: "RendererBase",
@@ -386,7 +600,95 @@ def _prompt_create_values(
     *,
     include_application: bool = True,
     include_device: bool = True,
+    use_application_schema: bool = False,
 ) -> dict[str, Any]:
+    if use_application_schema:
+        fields: list[Field] = [
+            Field(
+                key="display_name",
+                label="Display name",
+                kind="text",
+                required=True,
+                default=values.get("display_name"),
+                allow_blank=False,
+            ),
+            Field(
+                key="name",
+                label="Name",
+                kind="text",
+                required=False,
+                default=values.get("name"),
+            ),
+            Field(
+                key="version",
+                label="Version",
+                kind="text",
+                required=False,
+                default=values.get("version"),
+            ),
+            Field(
+                key="config_profile_ids",
+                label="Config profile ids",
+                kind="text",
+                required=False,
+                default=",".join(
+                    str(i) for i in (values.get("config_profile_ids") or [])
+                ),
+            ),
+            _resource_prompt_field(
+                client,
+                model_cls=ApplicationInstallationSolution,
+                key="solution",
+                label="Solution",
+                default=values.get("solution"),
+                required=False,
+                ordering="name",
+                label_attrs=("name",),
+            ),
+        ]
+        if include_device:
+            fields.insert(
+                2 if include_application else 1,
+                _resource_prompt_field(
+                    client,
+                    model_cls=Device,
+                    key="device",
+                    label="Device",
+                    default=values.get("device"),
+                    required=True,
+                    ordering="display_name",
+                    label_attrs=_DEVICE_LABEL_ATTRS,
+                ),
+            )
+        if include_application:
+            fields.insert(
+                1,
+                _resource_prompt_field(
+                    client,
+                    model_cls=Application,
+                    key="application",
+                    label="Application",
+                    default=values.get("application"),
+                    required=True,
+                    ordering="name",
+                    label_attrs=_APPLICATION_LABEL_ATTRS,
+                ),
+            )
+
+        prompted = renderer.prompt_fields(fields)
+        merged = {**values, **prompted}
+        merged["deployment_config"] = _prompt_deployment_config_value(
+            client,
+            renderer,
+            application=merged.get("application"),
+            current_value=values.get("deployment_config"),
+            use_application_schema=True,
+        )
+        merged["config_profile_ids"] = _get_resource_ids(
+            merged.get("config_profile_ids")
+        )
+        return merged
+
     fields: list[Field] = [
         Field(
             key="display_name",
@@ -476,7 +778,79 @@ def _prompt_update_values(
     *,
     include_application: bool = True,
     include_device: bool = True,
+    use_application_schema: bool = False,
 ) -> dict[str, Any]:
+    if use_application_schema:
+        fields: list[Field] = [
+            Field("name", "Name", "text", False, current_payload.get("name")),
+            Field(
+                "display_name",
+                "Display name",
+                "text",
+                False,
+                current_payload.get("display_name"),
+            ),
+            Field("version", "Version", "text", False, current_payload.get("version")),
+            Field(
+                "config_profile_ids",
+                "Config profile ids",
+                "text",
+                False,
+                ",".join(str(i) for i in current_payload.get("config_profile_ids", [])),
+            ),
+            _resource_prompt_field(
+                client,
+                model_cls=ApplicationInstallationSolution,
+                key="solution",
+                label="Solution",
+                default=current_payload.get("solution_id"),
+                required=False,
+                ordering="name",
+                label_attrs=("name",),
+            ),
+        ]
+        if include_device:
+            fields.insert(
+                3 if include_application else 2,
+                _resource_prompt_field(
+                    client,
+                    model_cls=Device,
+                    key="device",
+                    label="Device",
+                    default=current_payload.get("device_id"),
+                    required=False,
+                    ordering="display_name",
+                    label_attrs=_DEVICE_LABEL_ATTRS,
+                ),
+            )
+        if include_application:
+            fields.insert(
+                2,
+                _resource_prompt_field(
+                    client,
+                    model_cls=Application,
+                    key="application",
+                    label="Application",
+                    default=current_payload.get("application_id"),
+                    required=False,
+                    ordering="name",
+                    label_attrs=_APPLICATION_LABEL_ATTRS,
+                ),
+            )
+
+        prompted = renderer.prompt_fields(fields)
+        prompted["deployment_config"] = _prompt_deployment_config_value(
+            client,
+            renderer,
+            application=prompted.get("application") or current_payload.get("application_id"),
+            current_value=current_payload.get("deployment_config"),
+            use_application_schema=True,
+        )
+        prompted["config_profile_ids"] = _get_resource_ids(
+            prompted.get("config_profile_ids")
+        )
+        return prompted
+
     fields: list[Field] = [
         Field("name", "Name", "text", False, current_payload.get("name")),
         Field(
@@ -982,6 +1356,13 @@ def create(
             autocompletion=_solution_autocomplete(),
         ),
     ] = None,
+    schema: Annotated[
+        bool,
+        typer.Option(
+            "--schema/--no-schema",
+            help="Prompt deployment config using the application's config schema.",
+        ),
+    ] = True,
     _profile: ProfileAnnotation = None,
 ):
     """Create an application installation."""
@@ -999,7 +1380,20 @@ def create(
     }
 
     if not values["display_name"] or not values["application"] or not values["device"]:
-        values = _prompt_create_values(client, renderer, values)
+        values = _prompt_create_values(
+            client,
+            renderer,
+            values,
+            use_application_schema=schema and values.get("deployment_config") is None,
+        )
+    elif schema and values.get("deployment_config") is None:
+        values["deployment_config"] = _prompt_deployment_config_value(
+            client,
+            renderer,
+            application=values.get("application"),
+            current_value=None,
+            use_application_schema=True,
+        )
 
     payload = _build_app_install_payload(client, renderer, **values)
     for key, option_name in (
@@ -1063,6 +1457,13 @@ def update(
             autocompletion=_solution_autocomplete(),
         ),
     ] = None,
+    schema: Annotated[
+        bool,
+        typer.Option(
+            "--schema/--no-schema",
+            help="Prompt deployment config using the application's config schema.",
+        ),
+    ] = True,
     _profile: ProfileAnnotation = None,
 ):
     """Update an application installation."""
@@ -1088,11 +1489,18 @@ def update(
     }
     provided = {key: value for key, value in provided.items() if value is not None}
 
+    current_payload: dict[str, Any] | None = None
+
     if not provided:
         with renderer.loading("Loading current application installation..."):
             current_install = client.app_installs.retrieve(str(resolved_id))
         current_payload = _current_install_payload(current_install)
-        prompted = _prompt_update_values(client, renderer, current_payload)
+        prompted = _prompt_update_values(
+            client,
+            renderer,
+            current_payload,
+            use_application_schema=schema and deployment_config is None,
+        )
         updated_payload = _build_app_install_payload(
             client,
             renderer,
@@ -1108,6 +1516,18 @@ def update(
         )
         payload = _collect_changed_payload(current_payload, updated_payload)
     else:
+        if schema and "deployment_config" not in provided:
+            with renderer.loading("Loading current application installation..."):
+                current_install = client.app_installs.retrieve(str(resolved_id))
+            current_payload = _current_install_payload(current_install)
+            provided["deployment_config"] = _prompt_deployment_config_value(
+                client,
+                renderer,
+                application=provided.get("application")
+                or current_payload.get("application_id"),
+                current_value=current_payload.get("deployment_config"),
+                use_application_schema=True,
+            )
         payload = _build_app_install_payload(
             client,
             renderer,
@@ -1121,6 +1541,8 @@ def update(
             solution=provided.get("solution"),
             include_empty_config_profiles="config_profile_ids" in provided,
         )
+        if current_payload is not None:
+            payload = _collect_changed_payload(current_payload, payload)
 
     if not payload:
         print("No changes submitted.")
@@ -1529,6 +1951,13 @@ def device_create(
             autocompletion=_solution_autocomplete(),
         ),
     ] = None,
+    schema: Annotated[
+        bool,
+        typer.Option(
+            "--schema/--no-schema",
+            help="Prompt deployment config using the application's config schema.",
+        ),
+    ] = True,
     _profile: ProfileAnnotation = None,
 ):
     """Create an application installation on a device."""
@@ -1557,8 +1986,17 @@ def device_create(
             renderer,
             values,
             include_device=False,
+            use_application_schema=schema and values.get("deployment_config") is None,
         )
         values["device"] = str(resolved_device_id)
+    elif schema and values.get("deployment_config") is None:
+        values["deployment_config"] = _prompt_deployment_config_value(
+            client,
+            renderer,
+            application=values.get("application"),
+            current_value=None,
+            use_application_schema=True,
+        )
 
     payload = _build_app_install_payload(client, renderer, **values)
     for key, option_name in (
@@ -1659,6 +2097,13 @@ def device_update(
             autocompletion=_solution_autocomplete(),
         ),
     ] = None,
+    schema: Annotated[
+        bool,
+        typer.Option(
+            "--schema/--no-schema",
+            help="Prompt deployment config using the application's config schema.",
+        ),
+    ] = True,
     _profile: ProfileAnnotation = None,
 ):
     """Update an application installation on a device."""
@@ -1684,6 +2129,8 @@ def device_update(
     }
     provided = {key: value for key, value in provided.items() if value is not None}
 
+    current_payload: dict[str, Any] | None = None
+
     if not provided:
         with renderer.loading("Loading current application installation..."):
             current_install = client.app_installs.retrieve(str(resolved_id))
@@ -1693,6 +2140,7 @@ def device_update(
             renderer,
             current_payload,
             include_device=False,
+            use_application_schema=schema and deployment_config is None,
         )
         prompted["device"] = str(resolved_device_id)
         updated_payload = _build_app_install_payload(
@@ -1710,6 +2158,18 @@ def device_update(
         )
         payload = _collect_changed_payload(current_payload, updated_payload)
     else:
+        if schema and "deployment_config" not in provided:
+            with renderer.loading("Loading current application installation..."):
+                current_install = client.app_installs.retrieve(str(resolved_id))
+            current_payload = _current_install_payload(current_install)
+            provided["deployment_config"] = _prompt_deployment_config_value(
+                client,
+                renderer,
+                application=provided.get("application")
+                or current_payload.get("application_id"),
+                current_value=current_payload.get("deployment_config"),
+                use_application_schema=True,
+            )
         payload = _build_app_install_payload(
             client,
             renderer,
@@ -1723,6 +2183,8 @@ def device_update(
             solution=provided.get("solution"),
             include_empty_config_profiles="config_profile_ids" in provided,
         )
+        if current_payload is not None:
+            payload = _collect_changed_payload(current_payload, payload)
         payload.pop("device_id", None)
 
     if not payload:
@@ -2147,6 +2609,13 @@ def application_create(
             autocompletion=_solution_autocomplete(),
         ),
     ] = None,
+    schema: Annotated[
+        bool,
+        typer.Option(
+            "--schema/--no-schema",
+            help="Prompt deployment config using the application's config schema.",
+        ),
+    ] = True,
     _profile: ProfileAnnotation = None,
 ):
     """Create an application installation for an application."""
@@ -2175,8 +2644,17 @@ def application_create(
             renderer,
             values,
             include_application=False,
+            use_application_schema=schema and values.get("deployment_config") is None,
         )
         values["application"] = str(resolved_application_id)
+    elif schema and values.get("deployment_config") is None:
+        values["deployment_config"] = _prompt_deployment_config_value(
+            client,
+            renderer,
+            application=str(resolved_application_id),
+            current_value=None,
+            use_application_schema=True,
+        )
 
     payload = _build_app_install_payload(client, renderer, **values)
     for key, option_name in (
@@ -2269,6 +2747,13 @@ def application_update(
             autocompletion=_solution_autocomplete(),
         ),
     ] = None,
+    schema: Annotated[
+        bool,
+        typer.Option(
+            "--schema/--no-schema",
+            help="Prompt deployment config using the application's config schema.",
+        ),
+    ] = True,
     _profile: ProfileAnnotation = None,
 ):
     """Update an application installation for an application."""
@@ -2299,6 +2784,8 @@ def application_update(
     }
     provided = {key: value for key, value in provided.items() if value is not None}
 
+    current_payload: dict[str, Any] | None = None
+
     if not provided:
         with renderer.loading("Loading current application installation..."):
             current_install = client.app_installs.retrieve(str(resolved_id))
@@ -2308,6 +2795,7 @@ def application_update(
             renderer,
             current_payload,
             include_application=False,
+            use_application_schema=schema and deployment_config is None,
         )
         prompted["application"] = str(resolved_application_id)
         updated_payload = _build_app_install_payload(
@@ -2325,6 +2813,17 @@ def application_update(
         )
         payload = _collect_changed_payload(current_payload, updated_payload)
     else:
+        if schema and "deployment_config" not in provided:
+            with renderer.loading("Loading current application installation..."):
+                current_install = client.app_installs.retrieve(str(resolved_id))
+            current_payload = _current_install_payload(current_install)
+            provided["deployment_config"] = _prompt_deployment_config_value(
+                client,
+                renderer,
+                application=str(resolved_application_id),
+                current_value=current_payload.get("deployment_config"),
+                use_application_schema=True,
+            )
         payload = _build_app_install_payload(
             client,
             renderer,
@@ -2338,6 +2837,8 @@ def application_update(
             solution=provided.get("solution"),
             include_empty_config_profiles="config_profile_ids" in provided,
         )
+        if current_payload is not None:
+            payload = _collect_changed_payload(current_payload, payload)
         payload.pop("application_id", None)
 
     if not payload:
