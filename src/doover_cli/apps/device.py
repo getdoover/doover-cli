@@ -14,6 +14,7 @@ from ..utils.crud import (
 from ..utils.api import ProfileAnnotation
 from ..utils.state import state
 from .app_install import device_app as app_installs_app
+from .tunnel import device_app as tunnels_app
 
 if TYPE_CHECKING:
     from pydoover.api import ControlClient
@@ -25,6 +26,11 @@ app.add_typer(
     app_installs_app,
     name="app-installs",
     help="Manage application installations on a device.",
+)
+app.add_typer(
+    tunnels_app,
+    name="tunnels",
+    help="Manage tunnels on a device.",
 )
 _DEVICE_LABEL_ATTRS = ("display_name", "name")
 

@@ -31,6 +31,10 @@ class BasicRenderer(RendererBase):
                 print(f"{field.label} choices:")
                 for choice in field.resource_lookup_choices:
                     print(f"- {choice.label}")
+            elif field.choices:
+                print(
+                    f"{field.label} choices: {', '.join(str(c) for c in field.choices)}"
+                )
 
             values[field.key] = self._prompt_field(field)
         return values
@@ -69,7 +73,9 @@ class BasicRenderer(RendererBase):
 
     def _prompt_json_field(self, field: "Field") -> Any:
         if field.default is None and not field.required:
-            if not typer.confirm(f"{field.label}: configure JSON value?", default=False):
+            if not typer.confirm(
+                f"{field.label}: configure JSON value?", default=False
+            ):
                 return None
 
         while True:
@@ -130,6 +136,13 @@ class BasicRenderer(RendererBase):
                 raise typer.BadParameter(f"{field.label} is required.")
             return None
 
+        if field.choices:
+            allowed = [str(choice) for choice in field.choices]
+            if stripped not in allowed:
+                raise typer.BadParameter(
+                    f"{field.label} must be one of: {', '.join(allowed)}."
+                )
+            return stripped
         if field.kind == "int":
             if not stripped.lstrip("-").isdigit():
                 raise typer.BadParameter(f"Please enter a valid {field.label.lower()}.")

@@ -75,6 +75,7 @@ def build_prompt_field_for_spec(
     resource_model_label = None
     match_middle = False
     json_template = None
+    choices = list(spec.field.choices) if spec.field.choices else None
 
     if kind == "json":
         if spec.field.type == "Location":
@@ -108,6 +109,7 @@ def build_prompt_field_for_spec(
         required=spec.required,
         default=default,
         json_template=json_template,
+        choices=choices,
         resource_model_cls=resource_model_cls,
         resource_model_label=resource_model_label,
         resource_lookup_choices=resource_lookup_choices,

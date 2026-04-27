@@ -30,6 +30,7 @@ def _style_for_resource(value: ControlModel) -> str:
         return "dim " + style
     return style
 
+
 def _style_for_key(key: str | None) -> str | None:
     """Pick a colour for a raw (non-ControlModel) value based on its field key."""
     if key is None:
@@ -383,6 +384,12 @@ class DefaultRenderer(RendererBase):
         if field.kind == "json":
             return self._prompt_json_field(field)
 
+        if field.kind == "bool":
+            return self._prompt_bool_field(field)
+
+        if field.choices:
+            return self._prompt_choice_field(field)
+
         if field.kind == "resource" and field.resource_lookup_choices:
             choice_labels = [choice.label for choice in field.resource_lookup_choices]
             default_choice = next(
@@ -412,6 +419,38 @@ class DefaultRenderer(RendererBase):
         if answer is None:
             raise typer.Abort()
         return self._coerce_field_value(field, answer)
+
+    def _prompt_bool_field(self, field) -> Any:
+        default_value = bool(field.default) if field.default is not None else False
+        answer = questionary.confirm(field.label, default=default_value).unsafe_ask()
+        if answer is None:
+            raise typer.Abort()
+        return answer
+
+    def _prompt_choice_field(self, field) -> Any:
+        choice_strings = [str(choice) for choice in field.choices or []]
+        default_choice: str | None = None
+        if field.default is not None:
+            stringified_default = str(field.default)
+            if stringified_default in choice_strings:
+                default_choice = stringified_default
+
+        if not field.required:
+            blank_label = "(leave unset)"
+            choice_strings = [blank_label, *choice_strings]
+            if default_choice is None:
+                default_choice = blank_label
+
+        answer = questionary.select(
+            field.label,
+            choices=choice_strings,
+            default=default_choice,
+        ).unsafe_ask()
+        if answer is None:
+            raise typer.Abort()
+        if not field.required and answer == "(leave unset)":
+            return None
+        return answer
 
     def _prompt_json_field(self, field) -> Any:
         if field.default is None and not field.required:
