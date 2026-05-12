@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
+from pydoover.api import NotFoundError
 from pydoover.models.control import (
     Application,
     ApplicationInstallation,
@@ -21,10 +23,11 @@ from ..utils.crud import (
 )
 from ..utils.crud.lookup import load_control_model_choices, resolve_resource_lookup
 from ..utils.crud.prompting import humanize_field_name
+from ..utils.sentry import capture_handled_exception
 from ..utils.state import state
 
 if TYPE_CHECKING:
-    from pydoover.api import ControlClient
+    from pydoover.api import ControlClient, DataClient
     from ..renderer import RendererBase
 
 
@@ -446,9 +449,7 @@ def _build_json_schema_prompt_fields(
     current_object = current_value if isinstance(current_value, dict) else {}
 
     for key, property_schema in properties.items():
-        property_schema = (
-            property_schema if isinstance(property_schema, dict) else {}
-        )
+        property_schema = property_schema if isinstance(property_schema, dict) else {}
         property_types = set(_json_schema_types(property_schema))
         default = current_object.get(key, property_schema.get("default"))
         json_template = None
@@ -842,7 +843,8 @@ def _prompt_update_values(
         prompted["deployment_config"] = _prompt_deployment_config_value(
             client,
             renderer,
-            application=prompted.get("application") or current_payload.get("application_id"),
+            application=prompted.get("application")
+            or current_payload.get("application_id"),
             current_value=current_payload.get("deployment_config"),
             use_application_schema=True,
         )
@@ -1793,6 +1795,311 @@ def sync_config_profiles(
     renderer.render(response)
 
 
+# ── Invocations ───────────────────────────────────────────────────────────────
+#
+# Processor and integration apps publish an invocation summary message to a
+# per-install channel (``dv-proc-inv-<install_id>``) on their device's agent
+# every time they run, and structured log entries are stored alongside the
+# message. There is no dedicated control endpoint — these are doover-data
+# messages — so listing/retrieving them goes through DataClient.
+
+_INVOCATION_CHANNEL_PREFIX = "dv-proc-inv-"
+
+
+def _invocation_channel_for(install_id: int | str) -> str:
+    return f"{_INVOCATION_CHANNEL_PREFIX}{install_id}"
+
+
+def _resolve_install_for_invocations(
+    client: "ControlClient",
+    renderer: "RendererBase",
+    *,
+    action: str,
+    lookup: str | None,
+) -> ApplicationInstallation:
+    """Resolve the install lookup and fetch the full record so callers have
+    the device/agent id needed to talk to the data API."""
+    resolved_id = _resolve_app_install_id(
+        client,
+        renderer,
+        action=action,
+        lookup=lookup,
+        archived=False,
+    )
+    with renderer.loading("Loading application installation..."):
+        return client.app_installs.retrieve(str(resolved_id))
+
+
+def _agent_id_from_install(install: ApplicationInstallation) -> int:
+    device_id = _get_resource_id(getattr(install, "device", None))
+    if device_id is None:
+        raise typer.BadParameter(
+            "Application installation has no associated device, so it has no "
+            "invocation channel.",
+        )
+    return device_id
+
+
+def _format_invocation_timestamp(value: Any) -> str | None:
+    """Format the invocation ``started_at`` (ms epoch) as ISO-8601 in UTC."""
+    if value is None:
+        return None
+    try:
+        ms = int(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return (
+        datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
+
+
+def _invocation_summary_row(message: Any) -> dict[str, Any]:
+    """Flatten a doover-data Message into a row suitable for ``render_list``."""
+    data = getattr(message, "data", None) or {}
+    started_at = data.get("started_at")
+    if started_at is None:
+        # Fall back to the snowflake-derived timestamp on the message itself.
+        ts = getattr(message, "timestamp", None)
+        if isinstance(ts, datetime):
+            started_at = int(ts.timestamp() * 1000)
+
+    status = data.get("status")
+    if data.get("skip_reason"):
+        status = "skipped"
+    elif data.get("error") and status != "error":
+        status = "error"
+
+    return {
+        "id": getattr(message, "id", None),
+        "status": status,
+        "started_at": _format_invocation_timestamp(started_at),
+        "event_type": data.get("event_type"),
+        "duration_ms": data.get("duration_ms"),
+        "function_name": data.get("function_name"),
+        "request_id": data.get("requestId"),
+        "skip_reason": data.get("skip_reason"),
+        "error": _shorten_error(data.get("error")),
+    }
+
+
+def _shorten_error(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        message = value.get("message") or value.get("type")
+        return str(message) if message is not None else None
+    return str(value)
+
+
+def _format_log_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    """Normalise a log entry for the detail view.
+
+    Platform records (``platform.start``/``platform.report``) and app records
+    have different shapes; this collapses them into a common ``timestamp /
+    level / source / message`` shape so both render uniformly in the table.
+    """
+    if not isinstance(entry, dict):
+        return {"message": str(entry)}
+
+    timestamp = _format_invocation_timestamp(entry.get("timestamp"))
+    entry_type = entry.get("type")
+    if isinstance(entry_type, str) and entry_type.startswith("platform."):
+        record = entry.get("record") or {}
+        metrics = record.get("metrics") or {}
+        bits: list[str] = []
+        if record.get("status"):
+            bits.append(f"status={record['status']}")
+        for key in ("durationMs", "billedDurationMs", "initDurationMs"):
+            if metrics.get(key) is not None:
+                bits.append(f"{key}={metrics[key]}")
+        if metrics.get("maxMemoryUsedMB") is not None:
+            bits.append(
+                f"memory={metrics.get('maxMemoryUsedMB')}/"
+                f"{metrics.get('memorySizeMB')}MB"
+            )
+        return {
+            "timestamp": timestamp,
+            "level": entry_type.removeprefix("platform.").upper(),
+            "source": "platform",
+            "message": " ".join(bits),
+        }
+
+    return {
+        "timestamp": timestamp,
+        "level": entry.get("level"),
+        "source": entry.get("logger"),
+        "message": entry.get("message"),
+    }
+
+
+def _fetch_invocation_logs(
+    data_client: "DataClient",
+    *,
+    agent_id: int,
+    channel_name: str,
+    message_id: int,
+) -> list[dict[str, Any]]:
+    """Hit the message-logs endpoint directly — pydoover doesn't wrap it yet."""
+    result = data_client._request(
+        "GET",
+        f"/agents/{agent_id}/channels/{channel_name}/messages/{message_id}/logs",
+    )
+    if result is None:
+        return []
+    if isinstance(result, dict):
+        # Some endpoints wrap arrays in ``{"results": [...]}``; tolerate either.
+        result = result.get("results", [])
+    return list(result)
+
+
+@app.command()
+def invocations(
+    app_install: Annotated[
+        str | None,
+        typer.Argument(
+            help="Application install ID or exact display name/name.",
+            autocompletion=_app_install_autocomplete(archived=False),
+        ),
+    ] = None,
+    limit: Annotated[
+        int | None,
+        typer.Option(help="Maximum number of invocations to return."),
+    ] = 50,
+    before: Annotated[
+        str | None,
+        typer.Option(
+            help="Only return invocations before this snowflake ID or ISO timestamp.",
+        ),
+    ] = None,
+    after: Annotated[
+        str | None,
+        typer.Option(
+            help="Only return invocations after this snowflake ID or ISO timestamp.",
+        ),
+    ] = None,
+    _profile: ProfileAnnotation = None,
+):
+    """List recent invocations for an application installation."""
+    _ = _profile
+    client, renderer = get_state()
+    install = _resolve_install_for_invocations(
+        client,
+        renderer,
+        action="list invocations for",
+        lookup=app_install,
+    )
+    agent_id = _agent_id_from_install(install)
+    channel_name = _invocation_channel_for(install.id)
+
+    data_client = state.session.get_data_client()
+    try:
+        with renderer.loading("Loading invocations..."):
+            messages = data_client.list_messages(
+                agent_id,
+                channel_name,
+                limit=limit,
+                before=_parse_snowflake_or_timestamp(before),
+                after=_parse_snowflake_or_timestamp(after),
+            )
+    except NotFoundError as exc:
+        if state.debug:
+            raise
+        capture_handled_exception(
+            exc,
+            command="app-install.invocations",
+            message="Invocation channel not found.",
+        )
+        print(
+            "No invocation channel found for this install. "
+            "Has the app been invoked yet?"
+        )
+        raise typer.Exit(1) from exc
+
+    rows = [_invocation_summary_row(m) for m in messages]
+    renderer.render_list(rows)
+
+
+@app.command()
+def invocation(
+    app_install: Annotated[
+        str | None,
+        typer.Argument(
+            help="Application install ID or exact display name/name.",
+            autocompletion=_app_install_autocomplete(archived=False),
+        ),
+    ],
+    message_id: Annotated[
+        str,
+        typer.Argument(help="Invocation message ID (snowflake)."),
+    ],
+    _profile: ProfileAnnotation = None,
+):
+    """Get an invocation summary and its logs."""
+    _ = _profile
+    client, renderer = get_state()
+    install = _resolve_install_for_invocations(
+        client,
+        renderer,
+        action="get invocation for",
+        lookup=app_install,
+    )
+    agent_id = _agent_id_from_install(install)
+    channel_name = _invocation_channel_for(install.id)
+
+    try:
+        message_id_int = int(str(message_id).strip())
+    except ValueError as exc:
+        raise typer.BadParameter(
+            "message_id must be an integer snowflake ID.",
+            param_hint="message_id",
+        ) from exc
+
+    data_client = state.session.get_data_client()
+    try:
+        with renderer.loading("Loading invocation..."):
+            message = data_client.fetch_message(agent_id, channel_name, message_id_int)
+        with renderer.loading("Loading invocation logs..."):
+            log_entries = _fetch_invocation_logs(
+                data_client,
+                agent_id=agent_id,
+                channel_name=channel_name,
+                message_id=message_id_int,
+            )
+    except NotFoundError as exc:
+        if state.debug:
+            raise
+        capture_handled_exception(
+            exc,
+            command="app-install.invocation",
+            message="Invocation not found.",
+        )
+        print("Invocation not found on this install's channel.")
+        raise typer.Exit(1) from exc
+
+    summary = _invocation_summary_row(message)
+    summary["logs"] = [_format_log_entry(entry) for entry in log_entries]
+    renderer.render(summary)
+
+
+def _parse_snowflake_or_timestamp(value: str | None) -> int | datetime | None:
+    """Accept a raw snowflake/epoch-millis integer or an ISO-8601 timestamp."""
+    if value is None:
+        return None
+    stripped = str(value).strip()
+    if not stripped:
+        return None
+    if stripped.lstrip("-").isdigit():
+        return int(stripped)
+    try:
+        return datetime.fromisoformat(stripped.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise typer.BadParameter(
+            "Expected an integer snowflake ID or ISO-8601 timestamp.",
+        ) from exc
+
+
 @device_app.command(name="list")
 def device_list(
     device_id: Annotated[
@@ -2036,7 +2343,9 @@ def _resolve_device_scoped_app_install(
 
 @device_app.command(name="get")
 def device_get(
-    device_id: Annotated[str | None, typer.Argument(help="Device ID or exact display name/name.")] = None,
+    device_id: Annotated[
+        str | None, typer.Argument(help="Device ID or exact display name/name.")
+    ] = None,
     app_install: Annotated[
         str | None,
         typer.Argument(help="Application install ID or exact display name/name."),
@@ -2046,7 +2355,9 @@ def device_get(
     """Get an application installation on a device."""
     _ = _profile
     client, renderer = get_state()
-    resolved_device_id = _resolve_device_context_id(client, renderer, device_id, action="get app install from")
+    resolved_device_id = _resolve_device_context_id(
+        client, renderer, device_id, action="get app install from"
+    )
     resolved_id = _resolve_device_scoped_app_install(
         client,
         renderer,
@@ -2063,10 +2374,14 @@ def device_get(
 
 @device_app.command(name="update")
 def device_update(
-    device_id: Annotated[str | None, typer.Argument(help="Device ID or exact display name/name.")] = None,
+    device_id: Annotated[
+        str | None, typer.Argument(help="Device ID or exact display name/name.")
+    ] = None,
     app_install: Annotated[
         str | None,
-        typer.Argument(help="Application install ID or exact display name/name to update."),
+        typer.Argument(
+            help="Application install ID or exact display name/name to update."
+        ),
     ] = None,
     display_name: Annotated[
         str | None, typer.Option("--display-name", help="Display name.")
@@ -2109,7 +2424,9 @@ def device_update(
     """Update an application installation on a device."""
     _ = _profile
     client, renderer = get_state()
-    resolved_device_id = _resolve_device_context_id(client, renderer, device_id, action="update app install on")
+    resolved_device_id = _resolve_device_context_id(
+        client, renderer, device_id, action="update app install on"
+    )
     resolved_id = _resolve_device_scoped_app_install(
         client,
         renderer,
@@ -2199,17 +2516,23 @@ def device_update(
 
 @device_app.command(name="archive")
 def device_archive(
-    device_id: Annotated[str | None, typer.Argument(help="Device ID or exact display name/name.")] = None,
+    device_id: Annotated[
+        str | None, typer.Argument(help="Device ID or exact display name/name.")
+    ] = None,
     app_install: Annotated[
         str | None,
-        typer.Argument(help="Application install ID or exact display name/name to archive."),
+        typer.Argument(
+            help="Application install ID or exact display name/name to archive."
+        ),
     ] = None,
     _profile: ProfileAnnotation = None,
 ):
     """Archive an application installation on a device."""
     _ = _profile
     client, renderer = get_state()
-    resolved_device_id = _resolve_device_context_id(client, renderer, device_id, action="archive app install on")
+    resolved_device_id = _resolve_device_context_id(
+        client, renderer, device_id, action="archive app install on"
+    )
     resolved_id = _resolve_device_scoped_app_install(
         client,
         renderer,
@@ -2226,17 +2549,23 @@ def device_archive(
 
 @device_app.command(name="unarchive")
 def device_unarchive(
-    device_id: Annotated[str | None, typer.Argument(help="Device ID or exact display name/name.")] = None,
+    device_id: Annotated[
+        str | None, typer.Argument(help="Device ID or exact display name/name.")
+    ] = None,
     app_install: Annotated[
         str | None,
-        typer.Argument(help="Application install ID or exact display name/name to unarchive."),
+        typer.Argument(
+            help="Application install ID or exact display name/name to unarchive."
+        ),
     ] = None,
     _profile: ProfileAnnotation = None,
 ):
     """Unarchive an application installation on a device."""
     _ = _profile
     client, renderer = get_state()
-    resolved_device_id = _resolve_device_context_id(client, renderer, device_id, action="unarchive app install on")
+    resolved_device_id = _resolve_device_context_id(
+        client, renderer, device_id, action="unarchive app install on"
+    )
     resolved_id = _resolve_device_scoped_app_install(
         client,
         renderer,
@@ -2254,10 +2583,14 @@ def device_unarchive(
 
 @device_app.command(name="delete")
 def device_delete(
-    device_id: Annotated[str | None, typer.Argument(help="Device ID or exact display name/name.")] = None,
+    device_id: Annotated[
+        str | None, typer.Argument(help="Device ID or exact display name/name.")
+    ] = None,
     app_install: Annotated[
         str | None,
-        typer.Argument(help="Application install ID or exact display name/name to delete."),
+        typer.Argument(
+            help="Application install ID or exact display name/name to delete."
+        ),
     ] = None,
     yes: Annotated[
         bool, typer.Option("--yes", help="Delete without confirmation.")
@@ -2267,7 +2600,9 @@ def device_delete(
     """Permanently delete an application installation on a device."""
     _ = _profile
     client, renderer = get_state()
-    resolved_device_id = _resolve_device_context_id(client, renderer, device_id, action="delete app install on")
+    resolved_device_id = _resolve_device_context_id(
+        client, renderer, device_id, action="delete app install on"
+    )
     resolved_id = _resolve_device_scoped_app_install(
         client,
         renderer,
@@ -2291,17 +2626,23 @@ def device_delete(
 
 @device_app.command(name="deploy")
 def device_deploy(
-    device_id: Annotated[str | None, typer.Argument(help="Device ID or exact display name/name.")] = None,
+    device_id: Annotated[
+        str | None, typer.Argument(help="Device ID or exact display name/name.")
+    ] = None,
     app_install: Annotated[
         str | None,
-        typer.Argument(help="Application install ID or exact display name/name to deploy."),
+        typer.Argument(
+            help="Application install ID or exact display name/name to deploy."
+        ),
     ] = None,
     _profile: ProfileAnnotation = None,
 ):
     """Create a deployment for an application installation on a device."""
     _ = _profile
     client, renderer = get_state()
-    resolved_device_id = _resolve_device_context_id(client, renderer, device_id, action="deploy app install on")
+    resolved_device_id = _resolve_device_context_id(
+        client, renderer, device_id, action="deploy app install on"
+    )
     resolved_id = _resolve_device_scoped_app_install(
         client,
         renderer,
@@ -2318,10 +2659,14 @@ def device_deploy(
 
 @device_app.command(name="sync-config-profiles")
 def device_sync_config_profiles(
-    device_id: Annotated[str | None, typer.Argument(help="Device ID or exact display name/name.")] = None,
+    device_id: Annotated[
+        str | None, typer.Argument(help="Device ID or exact display name/name.")
+    ] = None,
     app_install: Annotated[
         str | None,
-        typer.Argument(help="Application install ID or exact display name/name to sync."),
+        typer.Argument(
+            help="Application install ID or exact display name/name to sync."
+        ),
     ] = None,
     config_profile_ids: Annotated[
         list[int] | None,
@@ -2335,7 +2680,9 @@ def device_sync_config_profiles(
     """Sync config profiles for an application installation on a device."""
     _ = _profile
     client, renderer = get_state()
-    resolved_device_id = _resolve_device_context_id(client, renderer, device_id, action="sync app install config profiles on")
+    resolved_device_id = _resolve_device_context_id(
+        client, renderer, device_id, action="sync app install config profiles on"
+    )
     resolved_id = _resolve_device_scoped_app_install(
         client,
         renderer,
@@ -2362,7 +2709,9 @@ def device_sync_config_profiles(
 
 @device_app.command(name="deployments")
 def device_deployments(
-    device_id: Annotated[str | None, typer.Argument(help="Device ID or exact display name/name.")] = None,
+    device_id: Annotated[
+        str | None, typer.Argument(help="Device ID or exact display name/name.")
+    ] = None,
     app_install: Annotated[
         str | None,
         typer.Argument(help="Application install ID or exact display name/name."),
@@ -2380,7 +2729,9 @@ def device_deployments(
     """List deployments for an application installation on a device."""
     _ = _profile
     client, renderer = get_state()
-    resolved_device_id = _resolve_device_context_id(client, renderer, device_id, action="list app install deployments on")
+    resolved_device_id = _resolve_device_context_id(
+        client, renderer, device_id, action="list app install deployments on"
+    )
     resolved_id = _resolve_device_scoped_app_install(
         client,
         renderer,
@@ -2403,7 +2754,9 @@ def device_deployments(
 
 @device_app.command(name="deployment")
 def device_deployment(
-    device_id: Annotated[str | None, typer.Argument(help="Device ID or exact display name/name.")],
+    device_id: Annotated[
+        str | None, typer.Argument(help="Device ID or exact display name/name.")
+    ],
     app_install: Annotated[
         str | None,
         typer.Argument(help="Application install ID or exact display name/name."),
@@ -2414,7 +2767,9 @@ def device_deployment(
     """Get a deployment for an application installation on a device."""
     _ = _profile
     client, renderer = get_state()
-    resolved_device_id = _resolve_device_context_id(client, renderer, device_id, action="get app install deployment on")
+    resolved_device_id = _resolve_device_context_id(
+        client, renderer, device_id, action="get app install deployment on"
+    )
     resolved_id = _resolve_device_scoped_app_install(
         client,
         renderer,
@@ -2716,7 +3071,9 @@ def application_update(
     ] = None,
     app_install: Annotated[
         str | None,
-        typer.Argument(help="Application install ID or exact display name/name to update."),
+        typer.Argument(
+            help="Application install ID or exact display name/name to update."
+        ),
     ] = None,
     display_name: Annotated[
         str | None, typer.Option("--display-name", help="Display name.")
@@ -2859,7 +3216,9 @@ def application_archive(
     ] = None,
     app_install: Annotated[
         str | None,
-        typer.Argument(help="Application install ID or exact display name/name to archive."),
+        typer.Argument(
+            help="Application install ID or exact display name/name to archive."
+        ),
     ] = None,
     _profile: ProfileAnnotation = None,
 ):
@@ -2894,7 +3253,9 @@ def application_unarchive(
     ] = None,
     app_install: Annotated[
         str | None,
-        typer.Argument(help="Application install ID or exact display name/name to unarchive."),
+        typer.Argument(
+            help="Application install ID or exact display name/name to unarchive."
+        ),
     ] = None,
     _profile: ProfileAnnotation = None,
 ):
@@ -2930,7 +3291,9 @@ def application_delete(
     ] = None,
     app_install: Annotated[
         str | None,
-        typer.Argument(help="Application install ID or exact display name/name to delete."),
+        typer.Argument(
+            help="Application install ID or exact display name/name to delete."
+        ),
     ] = None,
     yes: Annotated[
         bool, typer.Option("--yes", help="Delete without confirmation.")
@@ -2975,7 +3338,9 @@ def application_deploy(
     ] = None,
     app_install: Annotated[
         str | None,
-        typer.Argument(help="Application install ID or exact display name/name to deploy."),
+        typer.Argument(
+            help="Application install ID or exact display name/name to deploy."
+        ),
     ] = None,
     _profile: ProfileAnnotation = None,
 ):
@@ -3010,7 +3375,9 @@ def application_sync_config_profiles(
     ] = None,
     app_install: Annotated[
         str | None,
-        typer.Argument(help="Application install ID or exact display name/name to sync."),
+        typer.Argument(
+            help="Application install ID or exact display name/name to sync."
+        ),
     ] = None,
     config_profile_ids: Annotated[
         list[int] | None,
