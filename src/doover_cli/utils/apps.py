@@ -56,6 +56,7 @@ class LocalApplication(ControlApplication):
         build_widget_command: str | None = None,
         export_config_command: str | None = None,
         export_ui_command: str | None = None,
+        generate_ui: bool = True,
         run_command: str | None = None,
         staging_config: dict[str, Any] | None = None,
         base_path: Path | None = None,
@@ -113,6 +114,7 @@ class LocalApplication(ControlApplication):
         self.build_args = build_args
         self.export_config_command = export_config_command
         self.export_ui_command = export_ui_command
+        self.generate_ui = generate_ui
         self.run_command = run_command
         self.staging_config = staging_config or {}
         self.base_path = base_path
@@ -170,6 +172,7 @@ class LocalApplication(ControlApplication):
             build_widget_command=data.get("build_widget_command"),
             export_config_command=data.get("export_config_command"),
             export_ui_command=data.get("export_ui_command"),
+            generate_ui=data.get("generate_ui", True),
             run_command=data.get("run_command"),
             config_schema=data.get("config_schema"),
             ui_schema=data.get("ui_schema"),
@@ -241,6 +244,7 @@ class LocalApplication(ControlApplication):
             data["build_widget_command"] = self.build_widget_command
             data["export_config_command"] = self.export_config_command
             data["export_ui_command"] = self.export_ui_command
+            data["generate_ui"] = self.generate_ui
             data["run_command"] = self.run_command
 
         if include_cloud_only:

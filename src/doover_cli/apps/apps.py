@@ -171,6 +171,12 @@ def _build_application_payload(
     }
 
 
+def _should_export_ui(app_config) -> bool:
+    return app_config.type not in ("REP", "INT") and getattr(
+        app_config, "generate_ui", True
+    )
+
+
 def _get_persisted_application_id(app_config, *, staging: bool) -> int | None:
     if staging:
         staging_id = getattr(app_config, "staging_config", {}).get("id")
@@ -938,7 +944,7 @@ def publish(
     root_fp = get_app_directory(app_fp)
 
     # Resolve the app name early so subsequent get_app_config calls don't re-prompt.
-    _ = get_app_config(root_fp, app_name=app_name)
+    app_config = get_app_config(root_fp, app_name=app_name)
 
     if export_config:
         try:
@@ -951,8 +957,9 @@ def publish(
             typer.confirm("Do you want to continue?", abort=True)
         else:
             rich.print("[green]Exported application configuration.[/green]")
+            app_config = get_app_config(root_fp)
 
-    if export_ui:
+    if export_ui and _should_export_ui(app_config):
         try:
             ctx.invoke(export_ui_command, ctx, app_fp=root_fp, validate_=True)
         except Exception as exc:

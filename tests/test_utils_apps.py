@@ -34,6 +34,7 @@ def test_get_app_config_returns_local_application_and_resolves_paths(tmp_path):
                     "container_registry_profile_id": 22,
                     "image_name": "ghcr.io/getdoover/tracker-app:main",
                     "build_args": "--platform linux/amd64",
+                    "generate_ui": False,
                     "config_schema": {"type": "object"},
                     "staging_config": {"id": 404},
                 }
@@ -49,6 +50,7 @@ def test_get_app_config_returns_local_application_and_resolves_paths(tmp_path):
     assert app_config.container_registry_profile.id == 22
     assert app_config.src_directory == src_dir
     assert app_config.staging_config == {"id": 404}
+    assert app_config.generate_ui is False
 
 
 def test_local_application_save_to_disk_persists_local_fields(tmp_path):
@@ -68,6 +70,7 @@ def test_local_application_save_to_disk_persists_local_fields(tmp_path):
         container_registry_profile=22,
         image_name="ghcr.io/getdoover/tracker-app:main",
         build_args="--platform linux/amd64",
+        generate_ui=False,
         config_schema={"type": "object"},
         staging_config={"id": 404},
         base_path=tmp_path,
@@ -80,6 +83,7 @@ def test_local_application_save_to_disk_persists_local_fields(tmp_path):
     assert saved["organisation_id"] == 17
     assert saved["container_registry_profile_id"] == 22
     assert saved["build_args"] == "--platform linux/amd64"
+    assert saved["generate_ui"] is False
     assert saved["staging_config"] == {"id": 404}
 
 

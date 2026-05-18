@@ -606,6 +606,107 @@ def test_app_publish_default_skips_container_build(monkeypatch, tmp_path):
     assert captured["partial"][0] == "101"
 
 
+def test_app_publish_processor_type_without_ui_skips_ui_export(monkeypatch, tmp_path):
+    captured = {}
+    renderer = FakeRenderer()
+    app_config = FakeAppConfig(app_id=303)
+    app_config.type = "INT"
+    app_config._payload["type"] = "INT"
+    package_fp = tmp_path / "package.zip"
+    package_fp.write_bytes(b"zip-bytes")
+
+    class FakeApplicationsClient:
+        @staticmethod
+        def processor_source(application_id, body):
+            captured["processor_source"] = (application_id, body)
+            return {"id": 303}
+
+        @staticmethod
+        def processor_version(application_id, body):
+            captured["processor_version"] = (application_id, body)
+            return {"id": 303, "versioned": True}
+
+        @staticmethod
+        def partial(application_id, body):
+            captured["partial"] = (application_id, body)
+            return {"id": 303}
+
+    class FakeControlClient:
+        applications = FakeApplicationsClient()
+
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_config", lambda root_fp, app_name=None: app_config
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_state", lambda: (FakeControlClient(), renderer)
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_config_command",
+        lambda ctx, app_fp, validate_: None,
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_ui_command",
+        lambda ctx, app_fp, validate_: captured.setdefault("export_ui_called", True),
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.shell_run",
+        lambda command, cwd=None: captured.setdefault("build_script", (command, cwd)),
+    )
+
+    result = runner.invoke(app, ["app", "publish", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "export_ui_called" not in captured
+    assert captured["build_script"] == ("./build.sh", tmp_path)
+    assert captured["processor_source"] == ("303", {"file": package_fp})
+    assert renderer.render_calls == [{"id": 303, "versioned": True}]
+
+
+def test_app_publish_skips_ui_export_when_config_disables_generation(
+    monkeypatch, tmp_path
+):
+    captured = {}
+    renderer = FakeRenderer()
+    app_config = FakeAppConfig(app_id=101)
+    app_config.generate_ui = False
+
+    class FakeApplicationsClient:
+        @staticmethod
+        def partial(application_id, body):
+            captured["partial"] = (application_id, body)
+            return {"id": 101}
+
+    class FakeControlClient:
+        applications = FakeApplicationsClient()
+
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_config", lambda root_fp, app_name=None: app_config
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_state", lambda: (FakeControlClient(), renderer)
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_config_command",
+        lambda ctx, app_fp, validate_: None,
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_ui_command",
+        lambda ctx, app_fp, validate_: captured.setdefault("export_ui_called", True),
+    )
+
+    result = runner.invoke(app, ["app", "publish", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "export_ui_called" not in captured
+    assert captured["partial"][0] == "101"
+
+
 def test_app_publish_rejects_fix_me_values(monkeypatch, tmp_path):
     renderer = FakeRenderer()
     app_config = FakeAppConfig(app_id=101)
