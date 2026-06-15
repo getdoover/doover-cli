@@ -1,8 +1,11 @@
 import json
 
+import pytest
+import typer
 from pydoover.models.control import Application
 from pydoover.models.control._base import _MODEL_REGISTRY
 
+from doover_cli.utils import apps as apps_utils
 from doover_cli.utils.apps import LocalApplication, get_app_config
 
 
@@ -51,6 +54,89 @@ def test_get_app_config_returns_local_application_and_resolves_paths(tmp_path):
     assert app_config.src_directory == src_dir
     assert app_config.staging_config == {"id": 404}
     assert app_config.generate_ui is False
+
+
+def test_get_app_config_caches_explicit_app_name(monkeypatch, tmp_path):
+    config_path = tmp_path / "doover_config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "vega_level_sensor": {
+                    "name": "vega_level_sensor",
+                    "config_schema": {"type": "object"},
+                },
+                "farm_water_dashboard": {
+                    "name": "farm_water_dashboard",
+                    "config_schema": {"type": "object"},
+                },
+            }
+        )
+    )
+
+    def fail_select(*args, **kwargs):
+        raise AssertionError("questionary.select should not be called")
+
+    monkeypatch.setattr(apps_utils.questionary, "select", fail_select)
+
+    explicit_config = get_app_config(tmp_path, app_name="farm_water_dashboard")
+    cached_config = get_app_config(tmp_path)
+
+    assert explicit_config.name == "farm_water_dashboard"
+    assert cached_config.name == "farm_water_dashboard"
+
+
+def test_get_app_config_rejects_unknown_explicit_app_name(monkeypatch, tmp_path, capsys):
+    config_path = tmp_path / "doover_config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "vega_level_sensor": {
+                    "name": "vega_level_sensor",
+                    "config_schema": {"type": "object"},
+                },
+                "farm_water_dashboard": {
+                    "name": "farm_water_dashboard",
+                    "config_schema": {"type": "object"},
+                },
+            }
+        )
+    )
+
+    def fail_select(*args, **kwargs):
+        raise AssertionError("questionary.select should not be called")
+
+    monkeypatch.setattr(apps_utils.questionary, "select", fail_select)
+
+    with pytest.raises(typer.Exit) as exc:
+        get_app_config(tmp_path, app_name="missing_app")
+
+    assert exc.value.exit_code == 1
+    output = capsys.readouterr().out
+    assert "Application configuration 'missing_app' was not found" in output
+
+
+def test_get_app_config_rejects_unknown_explicit_app_name_with_single_app(
+    tmp_path, capsys
+):
+    config_path = tmp_path / "doover_config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "tracker-app": {
+                    "name": "tracker-app",
+                    "config_schema": {"type": "object"},
+                },
+            }
+        )
+    )
+
+    with pytest.raises(typer.Exit) as exc:
+        get_app_config(tmp_path, app_name="missing_app")
+
+    assert exc.value.exit_code == 1
+    output = capsys.readouterr().out
+    assert "Application configuration 'missing_app' was not found" in output
+    assert "Available applications: tracker-app." in output
 
 
 def test_local_application_save_to_disk_persists_local_fields(tmp_path):

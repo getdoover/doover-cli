@@ -372,14 +372,27 @@ def get_app_config(root_fp: Path, app_name: str | None = None) -> Any:
             f"Make sure the `type` is set to `application` in the configuration."
         )
         raise typer.Exit(1)
-    elif len(result) == 1:
-        return result[0]
 
     lookup = {r.name: r for r in result}
 
-    # Use explicit app_name, then cached selection, then prompt.
     resolved = root_fp.resolve()
-    name = app_name or _selected_app_name.get(resolved)
+
+    if app_name:
+        if app_name in lookup:
+            _selected_app_name[resolved] = app_name
+            return lookup[app_name]
+
+        available_names = ", ".join(lookup.keys())
+        print(
+            f"Application configuration '{app_name}' was not found in {config_path}. "
+            f"Available applications: {available_names}."
+        )
+        raise typer.Exit(1)
+
+    if len(result) == 1:
+        return result[0]
+
+    name = _selected_app_name.get(resolved)
     if name and name in lookup:
         return lookup[name]
 
