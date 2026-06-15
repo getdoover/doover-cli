@@ -1,6 +1,6 @@
 [project]
 name = "doover-cli"
-version = "0.3.1"
+version = "0.3.2"
 description = "CLI for Doover"
 requires-python = ">=3.11"
 dependencies = [
@@ -40,4 +40,3 @@ pydoover = { git = "https://github.com/getdoover/pydoover", branch = "chore/upda
 
 [tool.ty.environment]
 python = "./.venv"
-
