@@ -20,6 +20,7 @@ from .apps.device_type import app as device_type_app
 from .grpc import app as grpc_app
 from .login import app as login_app
 from .report import app as reports_app
+from .processor_test import processor_app
 from .apps.tunnel import app as tunnels_app
 from .user import org_app, users_app
 from .utils import sentry as sentry_utils
@@ -50,6 +51,7 @@ app.add_typer(
 )
 app.add_typer(login_app)
 app.add_typer(reports_app, name="report", help="Generate and manage reports.")
+app.add_typer(processor_app, name="processor", help="Test processor applications.")
 app.add_typer(tunnels_app, name="tunnel", help="Manage tunnels for remote access.")
 app.add_typer(grpc_app, name="grpc", help="Interact with running gRPC servers.")
 app.add_typer(dda_logs_app, name="dda-logs", help="Convert DDA message logs to JSON.")
