@@ -566,7 +566,7 @@ requires-dist = [
     { name = "jsf", specifier = ">=0.11.2" },
     { name = "paramiko", specifier = ">=3.5.1" },
     { name = "prompt-toolkit", specifier = ">=3.0.52" },
-    { name = "pydoover", specifier = ">=1.5.1" },
+    { name = "pydoover", git = "https://github.com/getdoover/pydoover?rev=feat%2Fproc-testing" },
     { name = "pytz", specifier = ">=2025.2" },
     { name = "questionary", specifier = ">=1.10.0" },
     { name = "requests", specifier = ">=2.32.3" },
@@ -1300,15 +1300,11 @@ wheels = [
 
 [[package]]
 name = "pydoover"
-version = "1.5.1"
-source = { registry = "https://pypi.org/simple" }
+version = "1.6.0"
+source = { git = "https://github.com/getdoover/pydoover?rev=feat%2Fproc-testing#2020bbe491d2bf5e9575ebe3529cea848d1b8c5a" }
 dependencies = [
     { name = "aiohttp" },
     { name = "httpx" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/70/6d/d3eefa00027a426eb68eea4f26eec8d2c9faaf14f6b4295f84744b76623d/pydoover-1.5.1.tar.gz", hash = "sha256:100f8e20506eba9c4af09daba07d2a21666007888277deadfd2586ec53edaa67", size = 542527, upload-time = "2026-06-19T05:02:38.121Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c4/b3/523fd82e5ca547a7a988f91a28bdd17fb11008cd8ef717345a68588ed2d0/pydoover-1.5.1-py3-none-any.whl", hash = "sha256:a87df9322ab1eabacd33823169cf4b05c1d57fbd87a5ff9eb80ecce760d3aa11", size = 279271, upload-time = "2026-06-19T05:02:36.577Z" },
 ]
 
 [[package]]
