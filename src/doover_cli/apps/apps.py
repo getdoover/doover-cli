@@ -1049,15 +1049,10 @@ def publish(
             application_id,
             root_fp,
         )
-        print("Done!")
-
-        print("Creating new lambda version release...")
-        version_response = client.applications.processor_version(
-            str(application_id),
-            body=dict(payload),
+        print(
+            "Done! Run `doover app release` to publish an immutable version of this app."
         )
-        print("Done!")
-        renderer.render(version_response or processor_response or response)
+        renderer.render(processor_response or response)
         raise typer.Exit(0)
 
     if build_container:
@@ -1077,6 +1072,68 @@ def publish(
 
     print("\n\nDone!")
     renderer.render(response)
+
+
+@app.command(name="release")
+def release(
+    app_fp: Annotated[
+        Path, typer.Argument(help="Path to the application directory.")
+    ] = Path(),
+    digest: Annotated[
+        str | None,
+        typer.Option(
+            help="Pushed image digest (e.g. sha256:…) for container apps. Ignored for processors."
+        ),
+    ] = None,
+    tag: Annotated[
+        str | None,
+        typer.Option(help="Optional version label (e.g. git sha / semver)."),
+    ] = None,
+    notes: Annotated[str, typer.Option(help="Optional release notes.")] = "",
+    staging: Annotated[
+        bool | None,
+        typer.Option(help="Force staging mode (default: inferred from the API URL)."),
+    ] = None,
+    app_name: Annotated[
+        str | None,
+        typer.Option(help="Application name in doover_config.json."),
+    ] = None,
+    _profile: ProfileAnnotation = None,
+):
+    """Publish an immutable version (release) of an application.
+
+    Run `doover app publish` first (it updates the app's metadata + config/UI
+    schema from doover_config.json). For container apps pass the pushed image
+    --digest; for processors the lambda version is published server-side.
+    """
+    _ = _profile
+    root_fp = get_app_directory(app_fp)
+    app_config = get_app_config(root_fp, app_name=app_name)
+    resolved_staging = _resolve_staging(staging)
+
+    application_id = _get_persisted_application_id(app_config, staging=resolved_staging)
+    if application_id is None:
+        rich.print(
+            "[red]Application has not been published yet. Run `doover app publish` first.[/red]"
+        )
+        raise typer.Exit(1)
+
+    if app_config.type == "DEV" and not digest:
+        rich.print(
+            "[red]--digest is required to release a container application.[/red]"
+        )
+        raise typer.Exit(1)
+
+    client, renderer = get_state()
+    with renderer.loading("Creating application version..."):
+        version = client.create_application_version(
+            application_id,
+            digest=digest,
+            tag=tag or "",
+            notes=notes or "",
+        )
+    rich.print("[green]Released a new application version.[/green]")
+    renderer.render(version)
 
 
 @app.command(
