@@ -306,16 +306,20 @@ def get_app_directory(root: Path | None = None) -> Path:
 
 
 def get_uv_path() -> Path:
-    brew = Path("/opt/homebrew/bin/uv")
-    if brew.exists():
-        return brew
+    # Prefer uv on PATH (covers CI where uv is installed to a tool cache dir),
+    # then common fixed locations.
+    found = shutil.which("uv")
+    if found:
+        return Path(found)
 
-    uv_path = Path.home() / ".local" / "bin" / "uv"
-    if not uv_path.exists():
-        raise RuntimeError(
-            "uv not found in your PATH. Please install it and try again."
-        )
-    return uv_path
+    for candidate in (
+        Path("/opt/homebrew/bin/uv"),
+        Path.home() / ".local" / "bin" / "uv",
+    ):
+        if candidate.exists():
+            return candidate
+
+    raise RuntimeError("uv not found in your PATH. Please install it and try again.")
 
 
 def call_with_uv(
