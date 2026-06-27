@@ -46,6 +46,33 @@ class DooverCLISession:
         )
 
     @classmethod
+    def from_trusted_publisher(
+        cls,
+        *,
+        provider: str = "GH",
+        oidc_token: str | None = None,
+        audience: str | None = None,
+        control_base_url: str | None = None,
+        timeout: float = 60.0,
+    ) -> "DooverCLISession":
+        """Build a session that publishes via the trusted-publisher OIDC flow —
+        no stored Doover secret. Inside GitHub Actions (provider 'GH' with
+        id-token permission) the OIDC token is fetched automatically."""
+        from pydoover.api.auth import TrustedPublisherAuthClient
+
+        # audience defaults to pydoover's DEFAULT_DOOVER_OIDC_AUDIENCE when unset.
+        kwargs = dict(
+            provider=provider,
+            oidc_token=oidc_token,
+            control_base_url=control_base_url,
+            timeout=timeout,
+        )
+        if audience:
+            kwargs["audience"] = audience
+        auth = TrustedPublisherAuthClient(**kwargs)
+        return cls(config_manager=None, profile_name=None, auth=auth)
+
+    @classmethod
     def from_env(cls, *, timeout: float = 60.0) -> "DooverCLISession":
         token = os.environ.get("DOOVER_API_TOKEN")
         if not token:

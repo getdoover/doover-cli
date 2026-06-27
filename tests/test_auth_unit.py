@@ -187,3 +187,49 @@ def test_session_require_agent_id_rejects_missing_value():
 
     with pytest.raises(typer.BadParameter):
         session.require_agent_id(None)
+
+
+def test_trusted_publisher_provider_detects_github_actions(monkeypatch):
+    from doover_cli.utils.api import _trusted_publisher_provider
+
+    monkeypatch.delenv("DOOVER_TRUSTED_PUBLISHER", raising=False)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "rt")
+
+    assert _trusted_publisher_provider() == "GH"
+
+
+def test_trusted_publisher_provider_explicit_flag(monkeypatch):
+    from doover_cli.utils.api import _trusted_publisher_provider
+
+    monkeypatch.setenv("DOOVER_TRUSTED_PUBLISHER", "1")
+
+    assert _trusted_publisher_provider() == "GH"
+
+
+def test_trusted_publisher_provider_absent(monkeypatch):
+    from doover_cli.utils.api import _trusted_publisher_provider
+
+    monkeypatch.delenv("DOOVER_TRUSTED_PUBLISHER", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.delenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", raising=False)
+
+    assert _trusted_publisher_provider() is None
+
+
+def test_session_from_trusted_publisher_builds_control_client():
+    from pydoover.api import auth as _auth
+
+    if not hasattr(_auth, "TrustedPublisherAuthClient"):
+        pytest.skip("installed pydoover lacks trusted-publisher support yet")
+
+    session = DooverCLISession.from_trusted_publisher(
+        provider="GH",
+        oidc_token="gh-oidc",
+        control_base_url="https://control.example",
+    )
+
+    assert session.auth.provider == "GH"
+    assert session.auth.control_base_url == "https://control.example"
+    client = session.get_control_client()
+    assert client.base_url == "https://control.example"
