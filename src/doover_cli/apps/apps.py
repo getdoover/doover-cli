@@ -104,6 +104,21 @@ def _resolve_staging(staging: bool | None) -> bool:
     return ".staging." in _control_base_url()
 
 
+def _detect_git_commit(root_fp: Path) -> str:
+    """Best-effort current git commit SHA for the app dir (empty if unavailable)."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=root_fp,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return ""
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
 def _build_container(
     root_fp: Path, *, buildx: bool, build_args: str, image_name: str
 ) -> None:
@@ -1087,7 +1102,13 @@ def release(
     ] = None,
     tag: Annotated[
         str | None,
-        typer.Option(help="Optional version label (e.g. git sha / semver)."),
+        typer.Option(help="Optional version label (e.g. semver / image tag)."),
+    ] = None,
+    commit: Annotated[
+        str | None,
+        typer.Option(
+            help="Source git commit SHA (for browsing the code). Defaults to the repo's HEAD."
+        ),
     ] = None,
     notes: Annotated[str, typer.Option(help="Optional release notes.")] = "",
     staging: Annotated[
@@ -1124,12 +1145,15 @@ def release(
         )
         raise typer.Exit(1)
 
+    resolved_commit = commit if commit is not None else _detect_git_commit(root_fp)
+
     client, renderer = get_state()
     with renderer.loading("Creating application version..."):
         version = client.create_application_version(
             application_id,
             digest=digest,
             tag=tag or "",
+            commit=resolved_commit or "",
             notes=notes or "",
         )
     rich.print("[green]Released a new application version.[/green]")

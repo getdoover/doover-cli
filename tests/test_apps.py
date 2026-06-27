@@ -662,7 +662,9 @@ def test_app_publish_processor_type_without_ui_skips_ui_export(monkeypatch, tmp_
     assert "export_ui_called" not in captured
     assert captured["build_script"] == ("./build.sh", tmp_path)
     assert captured["processor_source"] == ("303", {"file": package_fp})
-    assert renderer.render_calls == [{"id": 303, "versioned": True}]
+    # publish uploads the package but no longer cuts a version (that's `release`)
+    assert "processor_version" not in captured
+    assert renderer.render_calls == [{"id": 303}]
 
 
 def test_app_publish_skips_ui_export_when_config_disables_generation(
@@ -769,9 +771,7 @@ def test_app_publish_honours_explicit_staging(monkeypatch, tmp_path):
         lambda ctx, app_fp, validate_: None,
     )
 
-    result = runner.invoke(
-        app, ["app", "publish", str(tmp_path), "--staging"]
-    )
+    result = runner.invoke(app, ["app", "publish", str(tmp_path), "--staging"])
 
     assert result.exit_code == 0
     assert captured["body"]["deployment_data"] == "staging-data"
@@ -872,9 +872,7 @@ def test_app_publish_skips_build_when_requested_by_config(monkeypatch, tmp_path)
     assert renderer.render_calls == [{"id": 101}]
 
 
-def test_app_publish_processor_builds_package_and_releases_version(
-    monkeypatch, tmp_path
-):
+def test_app_publish_processor_builds_package_without_release(monkeypatch, tmp_path):
     captured = {}
     renderer = FakeRenderer()
     app_config = FakeAppConfig(app_id=303)
@@ -938,10 +936,11 @@ def test_app_publish_processor_builds_package_and_releases_version(
     assert captured["build_script"] == ("./build.sh", tmp_path)
     assert captured["application_id"] == "303"
     assert captured["body"] == {"file": package_fp}
-    assert captured["version"][0] == "303"
+    # publish uploads the package; the version is cut by `doover app release`
+    assert "version" not in captured
     assert "build_called" not in captured
     assert "push_called" not in captured
-    assert renderer.render_calls == [{"id": 303, "versioned": True}]
+    assert renderer.render_calls == [{"id": 303}]
 
 
 def test_publish_processor_package_uses_package_zip(tmp_path):
