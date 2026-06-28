@@ -31,6 +31,7 @@ from ..utils.apps import (
     call_with_uv,
     get_docker_path,
     get_app_config,
+    preserve_file,
 )
 from ..utils.crud import (
     build_update_command,
@@ -961,35 +962,40 @@ def publish(
     # Resolve the app name early so subsequent get_app_config calls don't re-prompt.
     app_config = get_app_config(root_fp, app_name=app_name)
 
-    if export_config:
-        try:
-            ctx.invoke(export_config_command, ctx, app_fp=root_fp, validate_=True)
-        except jsonschema.exceptions.SchemaError as exc:
-            summary, remainder = str(exc).split("\n", 1)
-            rich.print(
-                f"[red]Failed to export application configuration: {summary}[/red]\n{remainder}\n"
-            )
-            typer.confirm("Do you want to continue?", abort=True)
-        else:
-            rich.print("[green]Exported application configuration.[/green]")
-            app_config = get_app_config(root_fp)
+    # Generate the schema from the Python into doover_config.json so the upload
+    # payload carries the current source, then restore the file -- publishing
+    # never leaves generated config_schema/ui_schema in the working tree. The
+    # Python is the source of truth; the JSON is regenerated on demand.
+    with preserve_file(root_fp / "doover_config.json"):
+        if export_config:
+            try:
+                ctx.invoke(export_config_command, ctx, app_fp=root_fp, validate_=True)
+            except jsonschema.exceptions.SchemaError as exc:
+                summary, remainder = str(exc).split("\n", 1)
+                rich.print(
+                    f"[red]Failed to export application configuration: {summary}[/red]\n{remainder}\n"
+                )
+                typer.confirm("Do you want to continue?", abort=True)
+            else:
+                rich.print("[green]Exported application configuration.[/green]")
+                app_config = get_app_config(root_fp)
 
-    if export_ui and _should_export_ui(app_config):
-        try:
-            ctx.invoke(export_ui_command, ctx, app_fp=root_fp, validate_=True)
-        except Exception as exc:
-            rich.print(f"[red]Failed to export UI schema: {exc}[/red]\n")
-            typer.confirm("Do you want to continue?", abort=True)
-        else:
-            rich.print("[green]Exported UI schema.[/green]")
+        if export_ui and _should_export_ui(app_config):
+            try:
+                ctx.invoke(export_ui_command, ctx, app_fp=root_fp, validate_=True)
+            except Exception as exc:
+                rich.print(f"[red]Failed to export UI schema: {exc}[/red]\n")
+                typer.confirm("Do you want to continue?", abort=True)
+            else:
+                rich.print("[green]Exported UI schema.[/green]")
 
-    app_config = get_app_config(root_fp)
-    resolved_staging = _resolve_staging(staging)
-    payload = _build_application_payload(
-        app_config,
-        staging=resolved_staging,
-        include_deployment_data=True,
-    )
+        app_config = get_app_config(root_fp)
+        resolved_staging = _resolve_staging(staging)
+        payload = _build_application_payload(
+            app_config,
+            staging=resolved_staging,
+            include_deployment_data=True,
+        )
 
     client, renderer = get_state()
 

@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import shutil
+import contextlib
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,27 @@ def get_id_or_key(data: dict[str, Any], key: str) -> Any:
         return data[f"{key}_id"]
     except KeyError:
         return data.get(key)
+
+
+@contextlib.contextmanager
+def preserve_file(path: Path):
+    """Snapshot a file (or its absence) and restore it on exit.
+
+    Lets a command generate schema into ``doover_config.json`` transiently --
+    to validate it or build an upload payload from it -- without leaving the
+    working tree modified. This keeps generated ``config_schema``/``ui_schema``
+    out of git: the Python is the source of truth, the JSON is regenerated on
+    demand. Restores on exceptions too, so a failed run never dirties the tree.
+    """
+    existed = path.exists()
+    original = path.read_text() if existed else None
+    try:
+        yield
+    finally:
+        if existed:
+            path.write_text(original)
+        elif path.exists():
+            path.unlink()
 
 
 class LocalApplication(ControlApplication):
@@ -366,14 +388,16 @@ def get_app_config(root_fp: Path, app_name: str | None = None) -> Any:
 
     result = []
     for k, v in data.items():
-        if isinstance(v, dict) and "config_schema" in v:
-            # config_schema bit of a prerequisite for an app config entry.
+        if isinstance(v, dict) and "type" in v:
+            # `type` (e.g. DEV/PRO) marks an app entry. Don't key off
+            # config_schema -- it's generated from the Python and may be
+            # absent from the committed file.
             result.append(LocalApplication.from_config(v, root_fp))
 
     if len(result) == 0:
         print(
             f"No application configuration found in the `doover_config.json` file at {root_fp}. "
-            f"Make sure the `type` is set to `application` in the configuration."
+            f"Make sure each application entry has a `type` set in the configuration."
         )
         raise typer.Exit(1)
 

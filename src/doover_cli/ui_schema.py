@@ -6,7 +6,12 @@ from typing import Annotated
 import rich
 import typer
 
-from .utils.apps import get_app_directory, call_with_uv, get_app_config
+from .utils.apps import (
+    get_app_directory,
+    call_with_uv,
+    get_app_config,
+    preserve_file,
+)
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -55,18 +60,28 @@ def validate(
     export_: Annotated[
         bool,
         typer.Option(
-            "--export",
-            help="Export the UI schema before validating.",
+            "--export/--no-export",
+            help="Regenerate the schema from the Python before validating. "
+            "The export is transient -- doover_config.json is restored "
+            "afterwards, so validation never writes to the working tree.",
         ),
     ] = True,
 ):
     """Validate application UI schema is valid JSON."""
     root_fp = get_app_directory(app_fp)
+    config_file = root_fp / "doover_config.json"
 
     if export_ is True:
-        ctx.invoke(export, ctx, app_fp=root_fp, validate_=False)
+        # Validate the schema the Python *currently* generates, without leaving
+        # doover_config.json modified (e.g. when run as a pre-commit hook).
+        with preserve_file(config_file):
+            ctx.invoke(export, ctx, app_fp=root_fp, validate_=False)
+            _validate_ui_file(config_file)
+    else:
+        _validate_ui_file(config_file)
 
-    config_file = root_fp / "doover_config.json"
+
+def _validate_ui_file(config_file: Path):
     if not config_file.exists():
         raise FileNotFoundError(
             "doover_config.json not found. Please ensure there is a doover_config.json file in the application directory."

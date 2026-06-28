@@ -63,10 +63,12 @@ def test_get_app_config_caches_explicit_app_name(monkeypatch, tmp_path):
             {
                 "vega_level_sensor": {
                     "name": "vega_level_sensor",
+                    "type": "DEV",
                     "config_schema": {"type": "object"},
                 },
                 "farm_water_dashboard": {
                     "name": "farm_water_dashboard",
+                    "type": "DEV",
                     "config_schema": {"type": "object"},
                 },
             }
@@ -85,17 +87,21 @@ def test_get_app_config_caches_explicit_app_name(monkeypatch, tmp_path):
     assert cached_config.name == "farm_water_dashboard"
 
 
-def test_get_app_config_rejects_unknown_explicit_app_name(monkeypatch, tmp_path, capsys):
+def test_get_app_config_rejects_unknown_explicit_app_name(
+    monkeypatch, tmp_path, capsys
+):
     config_path = tmp_path / "doover_config.json"
     config_path.write_text(
         json.dumps(
             {
                 "vega_level_sensor": {
                     "name": "vega_level_sensor",
+                    "type": "DEV",
                     "config_schema": {"type": "object"},
                 },
                 "farm_water_dashboard": {
                     "name": "farm_water_dashboard",
+                    "type": "DEV",
                     "config_schema": {"type": "object"},
                 },
             }
@@ -124,6 +130,7 @@ def test_get_app_config_rejects_unknown_explicit_app_name_with_single_app(
             {
                 "tracker-app": {
                     "name": "tracker-app",
+                    "type": "DEV",
                     "config_schema": {"type": "object"},
                 },
             }
