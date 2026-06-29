@@ -1117,6 +1117,13 @@ def release(
         ),
     ] = None,
     notes: Annotated[str, typer.Option(help="Optional release notes.")] = "",
+    alpha: Annotated[
+        bool,
+        typer.Option(
+            help="Publish as a prerelease: the version is created but not "
+            "auto-selected as 'Latest' (reachable only by pinning it explicitly)."
+        ),
+    ] = False,
     staging: Annotated[
         bool | None,
         typer.Option(help="Force staging mode (default: inferred from the API URL)."),
@@ -1161,6 +1168,7 @@ def release(
             tag=tag or "",
             commit=resolved_commit or "",
             notes=notes or "",
+            alpha=alpha,
         )
     rich.print("[green]Released a new application version.[/green]")
     renderer.render(version)

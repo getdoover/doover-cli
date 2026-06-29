@@ -943,6 +943,48 @@ def test_app_publish_processor_builds_package_without_release(monkeypatch, tmp_p
     assert renderer.render_calls == [{"id": 303}]
 
 
+def test_app_release_passes_alpha_flag(monkeypatch, tmp_path):
+    captured = {}
+    renderer = FakeRenderer()
+    app_config = FakeAppConfig(app_id=404)
+
+    class FakeControlClient:
+        @staticmethod
+        def create_application_version(application_id, **kwargs):
+            captured["application_id"] = application_id
+            captured["kwargs"] = kwargs
+            return {"id": 1, "number": 1, "alpha": kwargs.get("alpha")}
+
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_config", lambda root_fp, app_name=None: app_config
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_state", lambda: (FakeControlClient(), renderer)
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps._detect_git_commit", lambda root_fp: "deadbeef"
+    )
+
+    result = runner.invoke(
+        app, ["app", "release", str(tmp_path), "--digest", "sha256:abc", "--alpha"]
+    )
+
+    assert result.exit_code == 0
+    assert captured["application_id"] == 404
+    assert captured["kwargs"]["alpha"] is True
+
+    # ...and defaults to False when the flag is omitted.
+    captured.clear()
+    result = runner.invoke(
+        app, ["app", "release", str(tmp_path), "--digest", "sha256:abc"]
+    )
+    assert result.exit_code == 0
+    assert captured["kwargs"]["alpha"] is False
+
+
 def test_publish_processor_package_uses_package_zip(tmp_path):
     package_fp = tmp_path / "package.zip"
     package_fp.write_bytes(b"zip-bytes")
