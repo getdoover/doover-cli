@@ -544,7 +544,7 @@ wheels = [
 
 [[package]]
 name = "doover-cli"
-version = "0.5.1"
+version = "0.5.2"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -1325,15 +1325,15 @@ wheels = [
 
 [[package]]
 name = "pydoover"
-version = "1.7.1"
+version = "1.7.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
     { name = "httpx" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bf/b6/446d8f51b55d402a9e92519a4f0ecad0571c3bc0c0ce5d8da98c456dd8a6/pydoover-1.7.1.tar.gz", hash = "sha256:2d98f99650078d105c49cd9ed8e6ba99ea1d6e04de39524beebf27871b102cb5", size = 537405, upload-time = "2026-06-27T10:44:37.13Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/34/85c2a78d1b3f8c3667718de7c665f2f8069861190f975ab8c92bec74974c/pydoover-1.7.2.tar.gz", hash = "sha256:db90118fb485fc8c22defa54db26a7c432619bda0bbbc74d080238a8f89b3e88", size = 537649, upload-time = "2026-06-29T00:07:44.584Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/76/7f/c688ea03adf654238a86035bbd94f225de4d923c6ace7fcd1ed7a47991ee/pydoover-1.7.1-py3-none-any.whl", hash = "sha256:bda708ab027987769c04385e1127e5d7706110308b650362e85cbb1f9478d872", size = 284995, upload-time = "2026-06-27T10:44:35.919Z" },
+    { url = "https://files.pythonhosted.org/packages/20/f4/041356e167a0ff7cb5049815978ee0dd89a1e54b5eac0a6871141c1ecd3a/pydoover-1.7.2-py3-none-any.whl", hash = "sha256:2ed04ca4d265508b22889cadfc2b5071ce704c0af23476f425060b8d9318af13", size = 285206, upload-time = "2026-06-29T00:07:43.165Z" },
 ]
 
 [[package]]
@@ -1719,14 +1719,14 @@ wheels = [
 
 [[package]]
 name = "smart-open"
-version = "7.7.1"
+version = "8.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/db/c6/22e7a2acd5d27941e85e0d7ede398da5abe2e4677d2265c924157247c32e/smart_open-7.7.1.tar.gz", hash = "sha256:9414ba5733e28309f29b28a303b0f1054ad23fe0275f1a1b600c80a724f4bd1a", size = 54952, upload-time = "2026-06-26T07:56:35.309Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/29/3e/79fd5fd2375a8a500b9ec2f6a0762fc1ac33e35582d4a87483a78d19408f/smart_open-8.0.0.tar.gz", hash = "sha256:5a2008d60688bd3b33c52e2ef666d3c60cf956e73e215de8c7b242cf56fdd1b2", size = 61520, upload-time = "2026-06-27T16:28:11.894Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8a/c5/14732c140fa0af0e59345949eaf9016c75ad3f076586f2413e3d3566a8da/smart_open-7.7.1-py3-none-any.whl", hash = "sha256:cb62dc45f519bf39b612564d326d2a17556f3a6056e3c3a86a07215d670d45bc", size = 65061, upload-time = "2026-06-26T07:56:33.685Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/bd/1c92e69a1daff70118f21e18ef3a100c114f00f08b64a1074484f12d9020/smart_open-8.0.0-py3-none-any.whl", hash = "sha256:ff4f395c9e86f23e27771dc4ba756ad4bd145f181859a782c50d64168485761b", size = 73029, upload-time = "2026-06-27T16:28:10.589Z" },
 ]
 
 [package.optional-dependencies]
