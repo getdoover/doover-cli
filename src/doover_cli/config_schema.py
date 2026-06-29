@@ -38,18 +38,25 @@ def export(
             file_okay=True,
         ),
     ] = None,
+    app_name: Annotated[
+        str | None,
+        typer.Option(
+            help="Application name in doover_config.json. Required to pick one "
+            "non-interactively when the repo defines multiple apps.",
+        ),
+    ] = None,
 ):
     """Export the application configuration to the doover config json file."""
     if config_fp is None:
         root_fp = get_app_directory(app_fp)
-        app_config = get_app_config(root_fp)
+        app_config = get_app_config(root_fp, app_name=app_name)
         call_with_uv(
             app_config.export_config_command or "export-config",
             in_shell=True,
             cwd=app_fp,
         )
     else:
-        config = get_app_config(app_fp)
+        config = get_app_config(app_fp, app_name=app_name)
         call_with_uv(config.src_directory / "app_config.py", in_shell=True)
 
     print("Exporting application configuration...")
@@ -74,6 +81,13 @@ def validate(
             "afterwards, so validation never writes to the working tree.",
         ),
     ] = True,
+    app_name: Annotated[
+        str | None,
+        typer.Option(
+            help="Application name in doover_config.json. Required to pick one "
+            "non-interactively when the repo defines multiple apps.",
+        ),
+    ] = None,
 ):
     """Validate application config is a valid JSON schema."""
     root_fp = get_app_directory(app_fp)
@@ -83,7 +97,7 @@ def validate(
         # Validate the schema the Python *currently* generates, without leaving
         # doover_config.json modified (e.g. when run as a pre-commit hook).
         with preserve_file(config_file):
-            ctx.invoke(export, ctx, app_fp=root_fp, validate_=False)
+            ctx.invoke(export, ctx, app_fp=root_fp, validate_=False, app_name=app_name)
             _validate_config_file(config_file)
     else:
         _validate_config_file(config_file)

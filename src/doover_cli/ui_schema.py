@@ -29,10 +29,17 @@ def export(
             help="Validate the UI schema before exporting.",
         ),
     ] = True,
+    app_name: Annotated[
+        str | None,
+        typer.Option(
+            help="Application name in doover_config.json. Required to pick one "
+            "non-interactively when the repo defines multiple apps.",
+        ),
+    ] = None,
 ):
     """Export the application UI schema to the doover config json file."""
     root_fp = get_app_directory(app_fp)
-    app_config = get_app_config(root_fp)
+    app_config = get_app_config(root_fp, app_name=app_name)
     export_command = app_config.export_ui_command or "export-ui"
     if export_command == "NO_EXPORT":
         print("App requested no ui export. Skipping...")
@@ -66,6 +73,13 @@ def validate(
             "afterwards, so validation never writes to the working tree.",
         ),
     ] = True,
+    app_name: Annotated[
+        str | None,
+        typer.Option(
+            help="Application name in doover_config.json. Required to pick one "
+            "non-interactively when the repo defines multiple apps.",
+        ),
+    ] = None,
 ):
     """Validate application UI schema is valid JSON."""
     root_fp = get_app_directory(app_fp)
@@ -75,7 +89,7 @@ def validate(
         # Validate the schema the Python *currently* generates, without leaving
         # doover_config.json modified (e.g. when run as a pre-commit hook).
         with preserve_file(config_file):
-            ctx.invoke(export, ctx, app_fp=root_fp, validate_=False)
+            ctx.invoke(export, ctx, app_fp=root_fp, validate_=False, app_name=app_name)
             _validate_ui_file(config_file)
     else:
         _validate_ui_file(config_file)

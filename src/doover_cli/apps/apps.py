@@ -938,6 +938,14 @@ def publish(
             help="Upload the widget when publishing. Disable with --no-put-widget.",
         ),
     ] = True,
+    build_package: Annotated[
+        bool,
+        typer.Option(
+            help="Build package.zip (./build.sh) before uploading a processor. "
+            "Use --no-build-package to upload an existing package.zip -- e.g. "
+            "when publishing several apps that share a single build.",
+        ),
+    ] = True,
     app_name: Annotated[
         str | None,
         typer.Option(
@@ -1062,8 +1070,13 @@ def publish(
             rich.print("[green]Widget uploaded.[/green]")
 
     if app_config.type in ("PRO", "REP", "INT"):
-        print("\nBuilding package.zip for upload...")
-        shell_run("./build.sh", cwd=root_fp)
+        if build_package:
+            print("\nBuilding package.zip for upload...")
+            shell_run("./build.sh", cwd=root_fp)
+        else:
+            print(
+                "\nSkipping package.zip build (--no-build-package); using existing package.zip."
+            )
         print("Uploading package.zip to Doover...")
         processor_response = _publish_processor_package(
             client,
