@@ -491,6 +491,51 @@ def test_app_publish_updates_existing_application(monkeypatch, tmp_path):
     assert renderer.render_calls == [{"id": 101, "published": True}]
 
 
+def test_app_publish_pins_client_to_app_organisation(monkeypatch, tmp_path):
+    # Regression: publish must set the org context on the client so the
+    # X-Doover-Organisation header is sent. Without it the control plane
+    # returns 401 "X-Doover-Organisation header missing" for non-staff accounts.
+    captured = {}
+    renderer = FakeRenderer()
+    app_config = FakeAppConfig(app_id=101)
+
+    class FakeApplicationsClient:
+        @staticmethod
+        def partial(application_id, body):
+            captured["partial"] = (application_id, body)
+            return {"id": int(application_id), "published": True}
+
+    class FakeControlClient:
+        organisation_id = None
+        applications = FakeApplicationsClient()
+
+    client = FakeControlClient()
+
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_config", lambda root_fp, app_name=None: app_config
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_state", lambda: (client, renderer)
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_config_command",
+        lambda ctx, app_fp, validate_: None,
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_ui_command",
+        lambda ctx, app_fp, validate_: None,
+    )
+
+    result = runner.invoke(app, ["app", "publish", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert client.organisation_id == 17
+    assert captured["partial"][0] == "101"
+
+
 def test_app_publish_creates_then_updates_when_missing(monkeypatch, tmp_path):
     captured = {}
     renderer = FakeRenderer()
