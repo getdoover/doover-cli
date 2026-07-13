@@ -971,6 +971,16 @@ def publish(
 
     client, renderer = get_state()
 
+    # The publish endpoints are organisation-scoped: without the
+    # X-Doover-Organisation header the control plane rejects the request with
+    # 401 "X-Doover-Organisation header missing" for any non-staff account.
+    # Pin the client to the app's organisation (staging-aware, resolved into the
+    # payload above) so every publish sub-call - create/partial, widget upload,
+    # processor source + version release - carries the header.
+    publish_org_id = payload.get("organisation_id")
+    if publish_org_id is not None:
+        client.organisation_id = int(publish_org_id)
+
     rich.print(
         f"Updating application on doover site ({_control_base_url() or 'unknown base URL'})...\n"
     )
