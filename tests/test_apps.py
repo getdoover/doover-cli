@@ -40,6 +40,12 @@ class FakeRenderer:
         self.render_list_calls.append(data)
 
 
+class OutputtingFakeRenderer(FakeRenderer):
+    def render(self, data):
+        super().render(data)
+        print("RENDERED APPLICATION INFO")
+
+
 def _resource_methods(**kwargs):
     return SimpleNamespace(**kwargs)
 
@@ -517,9 +523,7 @@ def test_app_publish_pins_client_to_app_organisation(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "doover_cli.apps.apps.get_app_config", lambda root_fp, app_name=None: app_config
     )
-    monkeypatch.setattr(
-        "doover_cli.apps.apps.get_state", lambda: (client, renderer)
-    )
+    monkeypatch.setattr("doover_cli.apps.apps.get_state", lambda: (client, renderer))
     monkeypatch.setattr(
         "doover_cli.apps.apps.export_config_command",
         lambda ctx, app_fp, validate_: None,
@@ -653,7 +657,7 @@ def test_app_publish_default_skips_container_build(monkeypatch, tmp_path):
 
 def test_app_publish_processor_type_without_ui_skips_ui_export(monkeypatch, tmp_path):
     captured = {}
-    renderer = FakeRenderer()
+    renderer = OutputtingFakeRenderer()
     app_config = FakeAppConfig(app_id=303)
     app_config.type = "INT"
     app_config._payload["type"] = "INT"
@@ -710,6 +714,8 @@ def test_app_publish_processor_type_without_ui_skips_ui_export(monkeypatch, tmp_
     # publish uploads the package but no longer cuts a version (that's `release`)
     assert "processor_version" not in captured
     assert renderer.render_calls == [{"id": 303}]
+    output = _strip_ansi(result.output)
+    assert "Done!\nRENDERED APPLICATION INFO\nRun doover app release" in output
 
 
 def test_app_publish_skips_ui_export_when_config_disables_generation(

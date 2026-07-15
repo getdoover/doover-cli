@@ -1093,10 +1093,12 @@ def publish(
             application_id,
             root_fp,
         )
-        print(
-            "Done! Run `doover app release` to publish an immutable version of this app."
-        )
+        print("Done!")
         renderer.render(processor_response or response)
+        rich.print(
+            "Run [blue]doover app release[/blue] to publish an immutable "
+            "version of this app."
+        )
         raise typer.Exit(0)
 
     if build_container:
