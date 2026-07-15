@@ -705,7 +705,7 @@ def test_app_publish_processor_type_without_ui_skips_ui_export(monkeypatch, tmp_
         lambda command, cwd=None: captured.setdefault("build_script", (command, cwd)),
     )
 
-    result = runner.invoke(app, ["app", "publish", str(tmp_path)])
+    result = runner.invoke(app, ["app", "publish", str(tmp_path), "--no-release"])
 
     assert result.exit_code == 0
     assert "export_ui_called" not in captured
@@ -981,7 +981,7 @@ def test_app_publish_processor_builds_package_without_release(monkeypatch, tmp_p
         lambda *args, **kwargs: captured.setdefault("push_called", True),
     )
 
-    result = runner.invoke(app, ["app", "publish", str(tmp_path)])
+    result = runner.invoke(app, ["app", "publish", str(tmp_path), "--no-release"])
 
     assert result.exit_code == 0
     assert captured["build_script"] == ("./build.sh", tmp_path)
