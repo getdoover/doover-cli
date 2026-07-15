@@ -132,6 +132,26 @@ def _push_container(image_name: str) -> None:
     shell_run(f"docker push {image_name}")
 
 
+def _get_image_digest(image_name: str) -> str | None:
+    """Best-effort repo digest (sha256:…) of a locally-tagged image after push."""
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "--format", "{{index .RepoDigests 0}}", image_name],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    # RepoDigests entries look like "ghcr.io/org/app@sha256:…".
+    repo_digest = result.stdout.strip()
+    if "@" in repo_digest:
+        return repo_digest.split("@", 1)[1]
+    return None
+
+
 def _require_publish_value(
     name: str, value, *, allow_empty_list: bool = False, allow_none: bool = False
 ):
@@ -946,6 +966,12 @@ def publish(
             "when publishing several apps that share a single build.",
         ),
     ] = True,
+    release: Annotated[
+        bool,
+        typer.Option(
+            help="Release package after building. CI/CD will manually handle this step, so should specify --no-release.",
+        ),
+    ] = True,
     app_name: Annotated[
         str | None,
         typer.Option(
@@ -1095,12 +1121,21 @@ def publish(
         )
         print("Done!")
         renderer.render(processor_response or response)
-        rich.print(
-            "Run [blue]doover app release[/blue] to publish an immutable "
-            "version of this app."
-        )
+        if release:
+            ctx.invoke(
+                release_command,
+                app_fp=root_fp,
+                staging=staging,
+                app_name=app_name,
+            )
+        else:
+            rich.print(
+                "Run [blue]doover app release[/blue] to publish an immutable "
+                "version of this app."
+            )
         raise typer.Exit(0)
 
+    image_digest: str | None = None
     if build_container:
         image_name = _require_publish_value("image_name", payload.get("image_name"))
         build_args = getattr(app_config, "build_args", "") or ""
@@ -1113,15 +1148,25 @@ def publish(
                 image_name=image_name,
             )
             _push_container(image_name)
+            image_digest = _get_image_digest(image_name)
         else:
             print("App requested to not build. Skipping build step.")
+
+    if release and image_digest is not None:
+        ctx.invoke(
+            release_command,
+            app_fp=root_fp,
+            digest=image_digest,
+            staging=staging,
+            app_name=app_name,
+        )
 
     print("\n\nDone!")
     renderer.render(response)
 
 
 @app.command(name="release")
-def release(
+def release_command(
     app_fp: Annotated[
         Path, typer.Argument(help="Path to the application directory.")
     ] = Path(),
