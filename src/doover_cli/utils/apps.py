@@ -6,6 +6,7 @@ import contextlib
 from pathlib import Path
 from typing import Any
 
+import rich
 import typer
 import questionary
 from pydoover.models.control import Application as ControlApplication
@@ -13,11 +14,62 @@ from pydoover.models.control import Application as ControlApplication
 from .shell_commands import run
 
 
-def get_id_or_key(data: dict[str, Any], key: str) -> Any:
-    try:
-        return data[f"{key}_id"]
-    except KeyError:
-        return data.get(key)
+# Legacy spellings of the two reference fields. Still read so existing configs
+# keep working, but warned about — the canonical name is the target value.
+DEPRECATED_REFS: dict[str, str] = {
+    "owner_org_id": "organisation_id",
+    "owner_org": "organisation_id",
+    "organisation": "organisation_id",
+    "container_registry_profile": "container_registry_profile_id",
+}
+
+# Fields that do nothing: left behind by an older CLI that wrote them, or
+# hand-written in the belief they did something. Maps to a replacement where one
+# exists, or None where the field should simply be deleted.
+RETIRED_FIELDS: dict[str, str | None] = {
+    # never read, in any version
+    "owner_org_key": "organisation_id",
+    "organisation_key": "organisation_id",
+    "container_registry_profile_key": "container_registry_profile_id",
+    "code_repo_key": None,
+    # retired here: never sent anywhere and never drove any behaviour
+    "code_repo_id": None,
+    "code_repo": None,
+    "repo_branch": None,
+    # cloud-owned state a config file has no business asserting. `lambda_arn` in
+    # particular used to be published, so a stale committed value could point an
+    # app at the wrong function.
+    "lambda_arn": None,
+    "stars": None,
+}
+
+# Never included in a publish payload, whatever the config says.
+NEVER_SENT = frozenset({"lambda_arn", "stars"})
+
+
+def resolve_ref(data: dict[str, Any], canonical: str) -> Any:
+    """Read a reference field by its canonical name, falling back to the legacy
+    spellings and telling the user to rename them."""
+    if canonical in data:
+        return data[canonical]
+
+    for legacy, target in DEPRECATED_REFS.items():
+        if target == canonical and legacy in data:
+            rich.print(
+                f"[yellow]doover_config.json: '{legacy}' is deprecated -- rename it "
+                f"to '{canonical}'.[/yellow]"
+            )
+            return data[legacy]
+    return None
+
+
+def warn_retired_fields(data: dict[str, Any]) -> None:
+    for key in sorted(set(RETIRED_FIELDS) & set(data)):
+        replacement = RETIRED_FIELDS[key]
+        advice = f"use '{replacement}'" if replacement else "delete it"
+        rich.print(
+            f"[yellow]doover_config.json: '{key}' has no effect -- {advice}.[/yellow]"
+        )
 
 
 @contextlib.contextmanager
@@ -61,18 +113,14 @@ class LocalApplication(ControlApplication):
         depends_on: list[str] | None = None,
         organisation: dict[str, Any] | str | int | None = None,
         approx_installs: int | None = None,
-        stars: int | None = None,
         container_registry_profile: dict[str, Any] | str | int | None = None,
         deployment_data: str | None = None,
         image_name: str | None = None,
-        lambda_arn: str | None = None,
         lambda_config: Any | None = None,
         config_profiles: list[Any] | None = None,
         icon_url: str | None = None,
         banner_url: str | None = None,
         key: str | None = None,
-        code_repo_id: str | int | None = None,
-        repo_branch: str | None = None,
         build_args: str | None = None,
         widget: str | Path | None = None,
         build_widget_command: str | None = None,
@@ -99,11 +147,9 @@ class LocalApplication(ControlApplication):
             depends_on=depends_on,
             organisation=organisation,
             approx_installs=approx_installs,
-            stars=stars,
             container_registry_profile=container_registry_profile,
             deployment_data=deployment_data,
             image_name=image_name,
-            lambda_arn=lambda_arn,
             lambda_config=lambda_config,
             config_profiles=config_profiles,
             icon_url=icon_url,
@@ -131,8 +177,6 @@ class LocalApplication(ControlApplication):
 
         self.build_widget_command = build_widget_command
         self.key = key
-        self.code_repo_id = code_repo_id
-        self.repo_branch = repo_branch or "main"
         self.build_args = build_args
         self.export_config_command = export_config_command
         self.export_ui_command = export_ui_command
@@ -141,16 +185,41 @@ class LocalApplication(ControlApplication):
         self.staging_config = staging_config or {}
         self.base_path = base_path
         self.deployment_folder = deployment_folder or "deployment"
+        # Set by from_config. None means "built in code, not parsed from a file",
+        # in which case to_request_payload sends everything as it always did.
+        self._provided_keys: set[str] | None = None
+        self._null_keys: set[str] = set()
 
     @property
     def src_directory(self) -> Path:
         return (self.base_path or Path()) / "src" / (self.name or "").replace("-", "_")
 
-    @staticmethod
-    def _request_payload_keys() -> set[str]:
-        fields = ControlApplication._versions["ApplicationSerializerDetailRequest"][
-            "fields"
-        ]
+    # Legacy spellings still land on one request field, so provided-key tracking
+    # has to normalise them.
+    _KEY_ALIASES = DEPRECATED_REFS
+
+    # The PATCH shape, which marks nothing as required. Publishing sends only what
+    # doover_config.json declares, so `name` -- the key the control plane upserts
+    # on -- is the one field the CLI insists on. Everything else is the server's
+    # problem: it still rejects a *create* that is missing something required,
+    # while an update simply leaves the undeclared fields alone.
+    _REQUEST_VERSION = "PatchedApplicationSerializerDetailRequest"
+
+    # Never filtered out: `name` identifies the app, and deployment_data is built
+    # from the deployment/ folder rather than read from the JSON.
+    _ALWAYS_SENT = frozenset({"name", "deployment_data"})
+
+    def _normalise_key(self, key: str) -> str:
+        return self._KEY_ALIASES.get(key, key)
+
+    def _provided_payload_keys(self) -> set[str] | None:
+        if self._provided_keys is None:
+            return None
+        return {self._normalise_key(key) for key in self._provided_keys}
+
+    @classmethod
+    def _request_payload_keys(cls) -> set[str]:
+        fields = ControlApplication._versions[cls._REQUEST_VERSION]["fields"]
         keys = set()
         for field_name, config in fields.items():
             keys.add(config.get("output_id", field_name))
@@ -167,7 +236,8 @@ class LocalApplication(ControlApplication):
 
     @classmethod
     def from_config(cls, data: dict[str, Any], app_base: Path) -> "LocalApplication":
-        return cls(
+        warn_retired_fields(data)
+        instance = cls(
             id=data.get("id"),
             key=data.get("key"),
             name=data.get("name"),
@@ -178,17 +248,12 @@ class LocalApplication(ControlApplication):
             description=data.get("description"),
             long_description=data.get("long_description"),
             depends_on=list(data.get("depends_on", [])),
-            organisation=get_id_or_key(data, "owner_org")
-            or get_id_or_key(data, "organisation"),
-            code_repo_id=get_id_or_key(data, "code_repo"),
-            repo_branch=data.get("repo_branch"),
+            organisation=resolve_ref(data, "organisation_id"),
             image_name=data.get("image_name"),
             build_args=data.get("build_args"),
-            container_registry_profile=get_id_or_key(
-                data,
-                "container_registry_profile",
+            container_registry_profile=resolve_ref(
+                data, "container_registry_profile_id"
             ),
-            lambda_arn=data.get("lambda_arn"),
             lambda_config=data.get("lambda_config"),
             widget=data.get("widget"),
             build_widget_command=data.get("build_widget_command"),
@@ -204,15 +269,37 @@ class LocalApplication(ControlApplication):
             base_path=app_base,
             deployment_folder=data.get("deployment_folder"),
         )
+        # Which keys doover_config.json actually spelled out. Every attribute
+        # above defaults when absent, so without this the object can't tell
+        # "omitted" from "set to the default" — and publishing would push those
+        # defaults over whatever the cloud holds. See to_request_payload.
+        staging = data.get("staging_config") or {}
+        instance._provided_keys = set(data) | set(staging)
+        # Declared as an explicit null. `to_version` drops None-valued attributes,
+        # so these have to be put back by hand -- omitting a field and setting it
+        # to null are different instructions, and only the second one should
+        # clear the value in the cloud.
+        instance._null_keys = {
+            instance._normalise_key(key)
+            for source in (data, staging)
+            for key, value in source.items()
+            if value is None
+        }
+        return instance
 
     def to_request_payload(
         self,
         *,
         include_deployment_data: bool = False,
         is_staging: bool = False,
-        method: str = "POST",
+        method: str | None = None,
+        only_provided: bool = True,
     ) -> dict[str, Any]:
-        payload = self.to_version("ApplicationSerializerDetailRequest", method=method)
+        # `method` is accepted for callers that still pass it, but the shape is
+        # always the PATCH one -- see _REQUEST_VERSION. The verb is decided by the
+        # publish flow (POST to upsert, PATCH when an id is pinned), not here.
+        _ = method
+        payload = self.to_version(self._REQUEST_VERSION)
         if is_staging:
             payload.update(
                 {
@@ -225,26 +312,43 @@ class LocalApplication(ControlApplication):
         if include_deployment_data:
             payload["deployment_data"] = self._deployment_data()
 
-        return payload
+        # doover_config.json is a patch, not a full replacement: a field it
+        # spells out is the source of truth, a field it omits keeps whatever the
+        # cloud already has. Without this, every attribute's fallback (False,
+        # None, []) would be published as if it were a deliberate choice —
+        # notably organisation_id, which would be nulled out on every publish.
+        provided = self._provided_payload_keys() if only_provided else None
+        if provided is not None:
+            payload = {
+                key: value
+                for key, value in payload.items()
+                if key in provided or key in self._ALWAYS_SENT
+            }
+            # `null` in the file is an instruction to clear the field, so restore
+            # the entries to_version dropped for being None.
+            for key in self._null_keys & self._request_payload_keys():
+                payload[key] = None
+
+        return {key: value for key, value in payload.items() if key not in NEVER_SENT}
 
     def to_config_dict(
         self,
         include_deployment_data: bool = False,
         is_staging: bool = False,
-        include_cloud_only: bool = False,
     ) -> dict[str, Any]:
         data = self.to_request_payload(
             include_deployment_data=include_deployment_data,
             is_staging=is_staging,
             method="POST",
+            # A config dump describes the app in full, so it is not a patch.
+            only_provided=False,
         )
         data.update(
             {
                 "id": self.id,
                 "key": self.key,
-                "owner_org_id": data.get("organisation_id"),
-                "code_repo_id": self.code_repo_id,
-                "repo_branch": self.repo_branch,
+                # Deliberately no `owner_org_id` twin here — writing both is what
+                # left most repos carrying two spellings of the same field.
                 "build_args": self.build_args,
                 "image_name": self.image_name,
                 "lambda_config": self.lambda_config,
@@ -269,40 +373,17 @@ class LocalApplication(ControlApplication):
             data["generate_ui"] = self.generate_ui
             data["run_command"] = self.run_command
 
-        if include_cloud_only:
-            data["lambda_arn"] = self.lambda_arn
-
         return data
 
     def to_dict(
         self,
         include_deployment_data: bool = False,
         is_staging: bool = False,
-        include_cloud_only: bool = False,
     ) -> dict[str, Any]:
         return self.to_config_dict(
             include_deployment_data=include_deployment_data,
             is_staging=is_staging,
-            include_cloud_only=include_cloud_only,
         )
-
-    def save_to_disk(self) -> None:
-        if self.base_path is None:
-            raise ValueError("Application base path is not set.")
-
-        config_path = self.base_path / "doover_config.json"
-        app_name = self.name or ""
-        data: dict[str, dict[str, Any]] = (
-            dict(json.loads(config_path.read_text()))
-            if config_path.exists()
-            else {app_name: {}}
-        )
-
-        upstream = self.to_config_dict(include_cloud_only=True)
-        upstream.pop("long_description", None)
-
-        data.setdefault(app_name, {}).update(**upstream)
-        config_path.write_text(json.dumps(data, indent=4))
 
 
 def get_app_directory(root: Path | None = None) -> Path:

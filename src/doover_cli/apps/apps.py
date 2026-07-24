@@ -177,34 +177,36 @@ def _build_application_payload(
     payload = app_config.to_request_payload(
         include_deployment_data=include_deployment_data,
         is_staging=staging,
-        method="POST",
     )
 
-    _require_publish_value("name", payload["name"])
-    _require_publish_value("display_name", payload["display_name"])
-    _require_publish_value("description", payload["description"])
-    _require_publish_value("type", payload["type"])
-    _require_publish_value("visibility", payload["visibility"])
-    _require_publish_value(
-        "organisation_id", payload["organisation_id"], allow_none=True
-    )
-    _require_publish_value(
-        "container_registry_profile_id",
-        payload["container_registry_profile_id"],
-        allow_none=True if payload["type"] != "DEV" else False,
-    )
-    _require_publish_value("depends_on", payload["depends_on"], allow_empty_list=True)
+    # `name` is the only field the CLI insists on -- it is what the control plane
+    # upserts on, so without it there is nothing to publish to.
+    if not payload.get("name"):
+        raise typer.BadParameter("name is required in doover_config.json.")
+
+    # Everything else is validated only if the file declares it: an omitted field
+    # is not an error, it just isn't part of this patch, and the control plane
+    # still rejects a *create* that is missing something it requires. A FIX-ME is
+    # always caught, since that is never a deliberate value.
+    for field, kwargs in (
+        ("name", {}),
+        ("display_name", {}),
+        ("description", {}),
+        ("type", {}),
+        ("visibility", {}),
+        ("organisation_id", {"allow_none": True}),
+        ("container_registry_profile_id", {"allow_none": True}),
+        ("depends_on", {"allow_empty_list": True}),
+    ):
+        if field in payload:
+            _require_publish_value(field, payload[field], **kwargs)
 
     if include_deployment_data is False:
         payload.pop("deployment_data", None)
 
-    return {
-        key: value
-        for key, value in payload.items()
-        if value is not None
-        or key == "organisation_id"
-        or key == "container_registry_profile_id"
-    }
+    # No None-stripping here: a key only reaches this point because the config
+    # declared it, and declaring `"organisation_id": null` means clear it.
+    return payload
 
 
 def _should_export_ui(app_config) -> bool:
@@ -222,18 +224,15 @@ def _get_persisted_application_id(app_config, *, staging: bool) -> int | None:
     return int(app_id) if app_id is not None else None
 
 
-def _persist_application_id(app_config, *, staging: bool, application_id: int) -> None:
-    if staging:
-        app_config.staging_config["id"] = application_id
-    else:
-        app_config.id = application_id
+def _resolve_application_id(client, app_config, *, staging: bool) -> int | None:
+    """The application's id, from doover_config.json if it is pinned there, else
+    looked up by name.
 
-    app_config.save_to_disk()
-
-
-def _resolve_existing_application_id(
-    client, app_config, *, staging: bool
-) -> int | None:
+    Application names are globally unique, so the name identifies the app on its
+    own and new projects need no id in their config at all. Older configs still
+    pin one; that wins, so renaming `name` there keeps renaming the app instead
+    of forking a new one.
+    """
     app_id = _get_persisted_application_id(app_config, staging=staging)
     if app_id is not None:
         return app_id
@@ -248,15 +247,13 @@ def _resolve_existing_application_id(
         item for item in page.results if getattr(item, "name", None) == app_config.name
     ]
     if len(matches) > 1:
+        # Shouldn't happen — the control plane enforces name uniqueness — but a
+        # silent wrong pick here would publish over the wrong app.
         raise typer.BadParameter(
             f"Multiple applications found matching name '{app_config.name}'. Set the application id in doover_config.json."
         )
     if len(matches) == 1:
-        application_id = int(matches[0].id)
-        _persist_application_id(
-            app_config, staging=staging, application_id=application_id
-        )
-        return application_id
+        return int(matches[0].id)
     return None
 
 
@@ -784,10 +781,12 @@ def put_widget(
     client, renderer = get_state()
 
     resolved_staging = _resolve_staging(staging)
-    application_id = _get_persisted_application_id(app_config, staging=resolved_staging)
+    application_id = _resolve_application_id(
+        client, app_config, staging=resolved_staging
+    )
     if application_id is None:
         rich.print(
-            "[red]No application ID found in doover_config.json. Publish the app first.[/red]"
+            f"[red]No application named '{app_config.name}' found. Publish the app first.[/red]"
         )
         raise typer.Exit(1)
 
@@ -1049,29 +1048,24 @@ def publish(
 
     try:
         with renderer.loading("Publishing application..."):
-            # application_id = _resolve_existing_application_id(
-            #     client,
-            #     app_config,
-            #     staging=resolved_staging,
-            # )
             application_id = _get_persisted_application_id(
                 app_config, staging=resolved_staging
             )
-            if application_id is None:
-                print(json.dumps(payload, indent=4))
-                created = client.applications.create(body=dict(payload))
-                application_id = int(created.id)
-                _persist_application_id(
-                    app_config,
-                    staging=resolved_staging,
-                    application_id=application_id,
+            if application_id is not None:
+                # Config pins an id — update that app directly, so changing
+                # `name` renames it rather than creating a second app.
+                response = client.applications.partial(
+                    str(application_id),
+                    body=dict(payload),
                 )
-                print(f"Created new application with id: {application_id}")
-
-            response = client.applications.partial(
-                str(application_id),
-                body=dict(payload),
-            )
+            else:
+                # No id: POST and let the control plane upsert on the globally
+                # unique name — creating the app if the name is free, updating it
+                # if we're allowed to. Nothing is written back to
+                # doover_config.json, so the repo stays the source of truth and a
+                # fresh clone publishes identically.
+                response = client.applications.create(body=dict(payload))
+                application_id = int(response.id)
     except typer.Exit:
         raise
     except click.Abort:
@@ -1215,7 +1209,13 @@ def release_command(
     app_config = get_app_config(root_fp, app_name=app_name)
     resolved_staging = _resolve_staging(staging)
 
-    application_id = _get_persisted_application_id(app_config, staging=resolved_staging)
+    client, renderer = get_state()
+
+    # `release` runs as its own process (CI invokes it after `publish`), so it
+    # resolves the id itself — by name when the config doesn't pin one.
+    application_id = _resolve_application_id(
+        client, app_config, staging=resolved_staging
+    )
     if application_id is None:
         rich.print(
             "[red]Application has not been published yet. Run `doover app publish` first.[/red]"
@@ -1230,7 +1230,6 @@ def release_command(
 
     resolved_commit = commit if commit is not None else _detect_git_commit(root_fp)
 
-    client, renderer = get_state()
     with renderer.loading("Creating application version..."):
         version = client.create_application_version(
             application_id,

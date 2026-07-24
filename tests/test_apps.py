@@ -92,7 +92,7 @@ class FakeAppConfig:
             payload["deployment_data"] = "staging-data" if is_staging else "from-config"
         return payload
 
-    def to_dict(self, *, include_deployment_data, is_staging, include_cloud_only):
+    def to_dict(self, *, include_deployment_data, is_staging):
         return self.to_request_payload(
             include_deployment_data=include_deployment_data,
             is_staging=is_staging,
@@ -540,7 +540,10 @@ def test_app_publish_pins_client_to_app_organisation(monkeypatch, tmp_path):
     assert captured["partial"][0] == "101"
 
 
-def test_app_publish_creates_then_updates_when_missing(monkeypatch, tmp_path):
+def test_app_publish_upserts_by_name_when_config_has_no_id(monkeypatch, tmp_path):
+    """With no id pinned in doover_config.json, publish is a single POST — the
+    control plane upserts on the globally unique name. Nothing is written back to
+    the config, so a fresh clone publishes identically."""
     captured = {}
     renderer = FakeRenderer()
     app_config = FakeAppConfig(app_id=None)
@@ -593,18 +596,12 @@ def test_app_publish_creates_then_updates_when_missing(monkeypatch, tmp_path):
     result = runner.invoke(app, ["app", "publish", str(tmp_path)])
 
     assert result.exit_code == 0
-    if "list_kwargs" in captured:
-        assert captured["list_kwargs"] == {
-            "name": "tracker-app",
-            "archived": False,
-            "page": 1,
-            "per_page": 100,
-        }
     assert captured["create_body"]["name"] == "tracker-app"
-    assert captured["partial"][0] == "202"
-    assert app_config.id == 202
-    assert app_config.save_calls == 1
-    assert renderer.render_calls == [{"id": 202}]
+    # The POST is the whole write — no follow-up PATCH by id.
+    assert "partial" not in captured
+    # The id is never persisted back into doover_config.json.
+    assert app_config.id is None
+    assert app_config.save_calls == 0
 
 
 def test_app_publish_default_skips_container_build(monkeypatch, tmp_path):
