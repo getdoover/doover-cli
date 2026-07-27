@@ -991,6 +991,140 @@ def test_app_publish_processor_builds_package_without_release(monkeypatch, tmp_p
     assert renderer.render_calls == [{"id": 303}]
 
 
+def test_app_publish_forwards_release_metadata(monkeypatch, tmp_path):
+    captured = {}
+    renderer = FakeRenderer()
+    app_config = FakeAppConfig(app_id=303)
+    app_config.type = "PRO"
+    (tmp_path / "package.zip").write_bytes(b"zip-bytes")
+
+    class FakeApplicationsClient:
+        @staticmethod
+        def processor_source(application_id, body):
+            return {"id": 303}
+
+        @staticmethod
+        def partial(application_id, body):
+            return {"id": 303}
+
+    class FakeControlClient:
+        applications = FakeApplicationsClient()
+
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_config", lambda root_fp, app_name=None: app_config
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_state", lambda: (FakeControlClient(), renderer)
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_config_command",
+        lambda ctx, app_fp, validate_: None,
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_ui_command",
+        lambda ctx, app_fp, validate_: None,
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.shell_run", lambda command, cwd=None: None
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.release_command",
+        lambda **kwargs: captured.update(kwargs),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "app",
+            "publish",
+            str(tmp_path),
+            "--digest",
+            "sha256:processor",
+            "--tag",
+            "v1.2.3",
+            "--commit",
+            "deadbeef",
+            "--notes",
+            "Release notes",
+            "--alpha",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured == {
+        "app_fp": tmp_path,
+        "digest": "sha256:processor",
+        "tag": "v1.2.3",
+        "commit": "deadbeef",
+        "notes": "Release notes",
+        "alpha": True,
+        "staging": None,
+        "app_name": None,
+    }
+
+
+def test_app_publish_explicit_digest_overrides_detected_digest(monkeypatch, tmp_path):
+    captured = {}
+    renderer = FakeRenderer()
+    app_config = FakeAppConfig(app_id=404)
+
+    class FakeApplicationsClient:
+        @staticmethod
+        def partial(application_id, body):
+            return {"id": 404}
+
+    class FakeControlClient:
+        applications = FakeApplicationsClient()
+
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_config", lambda root_fp, app_name=None: app_config
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_state", lambda: (FakeControlClient(), renderer)
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_config_command",
+        lambda ctx, app_fp, validate_: None,
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_ui_command",
+        lambda ctx, app_fp, validate_: None,
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps._build_container", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr("doover_cli.apps.apps._push_container", lambda image_name: None)
+    monkeypatch.setattr(
+        "doover_cli.apps.apps._get_image_digest",
+        lambda image_name: "sha256:detected",
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.release_command",
+        lambda **kwargs: captured.update(kwargs),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "app",
+            "publish",
+            str(tmp_path),
+            "--build-container",
+            "--digest",
+            "sha256:explicit",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert captured["digest"] == "sha256:explicit"
+
+
 def test_app_release_passes_alpha_flag(monkeypatch, tmp_path):
     captured = {}
     renderer = FakeRenderer()

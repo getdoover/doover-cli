@@ -968,9 +968,33 @@ def publish(
     release: Annotated[
         bool,
         typer.Option(
-            help="Release package after building. CI/CD will manually handle this step, so should specify --no-release.",
+            help="Release the application after publishing. Disable with --no-release.",
         ),
     ] = True,
+    digest: Annotated[
+        str | None,
+        typer.Option(
+            help="Pushed image digest (e.g. sha256:…) to use for the release. "
+            "For container builds this overrides the automatically detected digest."
+        ),
+    ] = None,
+    tag: Annotated[
+        str | None,
+        typer.Option(help="Optional version label (e.g. semver / image tag)."),
+    ] = None,
+    commit: Annotated[
+        str | None,
+        typer.Option(
+            help="Source git commit SHA for the release. Defaults to the repo's HEAD."
+        ),
+    ] = None,
+    notes: Annotated[str, typer.Option(help="Optional release notes.")] = "",
+    alpha: Annotated[
+        bool,
+        typer.Option(
+            help="Publish the release as a prerelease that is not auto-selected as 'Latest'."
+        ),
+    ] = False,
     app_name: Annotated[
         str | None,
         typer.Option(
@@ -1119,6 +1143,11 @@ def publish(
             ctx.invoke(
                 release_command,
                 app_fp=root_fp,
+                digest=digest,
+                tag=tag,
+                commit=commit,
+                notes=notes,
+                alpha=alpha,
                 staging=staging,
                 app_name=app_name,
             )
@@ -1129,7 +1158,7 @@ def publish(
             )
         raise typer.Exit(0)
 
-    image_digest: str | None = None
+    detected_digest: str | None = None
     if build_container:
         image_name = _require_publish_value("image_name", payload.get("image_name"))
         build_args = getattr(app_config, "build_args", "") or ""
@@ -1142,15 +1171,20 @@ def publish(
                 image_name=image_name,
             )
             _push_container(image_name)
-            image_digest = _get_image_digest(image_name)
+            detected_digest = _get_image_digest(image_name)
         else:
             print("App requested to not build. Skipping build step.")
 
-    if release and image_digest is not None:
+    release_digest = digest or detected_digest
+    if release and release_digest is not None:
         ctx.invoke(
             release_command,
             app_fp=root_fp,
-            digest=image_digest,
+            digest=release_digest,
+            tag=tag,
+            commit=commit,
+            notes=notes,
+            alpha=alpha,
             staging=staging,
             app_name=app_name,
         )
