@@ -7,6 +7,7 @@ import re
 import shutil
 import socket
 import subprocess
+import tempfile
 import time
 from urllib.parse import urlencode
 from pathlib import Path
@@ -26,6 +27,7 @@ import questionary
 from ..config_schema import export as export_config_command
 from ..ui_schema import export as export_ui_command
 from ..utils.api import ProfileAnnotation
+from ..registry import is_doover_registry, login_for_push
 from ..utils.apps import (
     get_app_directory,
     call_with_uv,
@@ -120,12 +122,49 @@ def _detect_git_commit(root_fp: Path) -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
+def _is_multi_platform(build_args: str) -> bool:
+    """Whether `build_args` asks for more than one platform.
+
+    Multi-platform changes how the image has to be built: buildx cannot load a
+    multi-platform result into the local daemon, so it must push directly, and
+    the digest has to come from buildx rather than the daemon.
+    """
+    for token in ("--platform", "--platform="):
+        if token in build_args:
+            tail = build_args.split(token, 1)[1].lstrip("= ").split()[0]
+            return "," in tail
+    return False
+
+
 def _build_container(
     root_fp: Path, *, buildx: bool, build_args: str, image_name: str
 ) -> None:
     shell_run(
         f"docker {'buildx' if buildx else ''} build {build_args} -t {image_name} {str(root_fp)}",
     )
+
+
+def _build_and_push_multi_platform(
+    root_fp: Path, *, build_args: str, image_name: str
+) -> str | None:
+    """Build and push a multi-platform image in one step, returning its digest.
+
+    A multi-platform build cannot be loaded into the local daemon, so `build`
+    then `push` does not work -- and `docker inspect` afterwards reports either
+    nothing or the single-platform digest, not the index. buildx writes the real
+    digest to a metadata file, which is the only reliable source.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        metadata_fp = Path(tmp) / "metadata.json"
+        shell_run(
+            f"docker buildx build {build_args} --push "
+            f"--metadata-file {metadata_fp} -t {image_name} {str(root_fp)}",
+        )
+        try:
+            metadata = json.loads(metadata_fp.read_text())
+        except (OSError, ValueError):
+            return None
+    return metadata.get("containerimage.digest")
 
 
 def _push_container(image_name: str) -> None:
@@ -1164,14 +1203,41 @@ def publish(
         build_args = getattr(app_config, "build_args", "") or ""
         if build_args != "NO_BUILD":
             print("\nBuilding and pushing container image to the registry...")
-            _build_container(
-                root_fp,
-                buildx=buildx,
-                build_args=build_args,
-                image_name=image_name,
-            )
-            _push_container(image_name)
-            detected_digest = _get_image_digest(image_name)
+
+            # Pushing to the doover registry needs a credential scoped to this
+            # app's repository, minted against the publish permission we just
+            # exercised. Other registries keep using whatever docker login the
+            # user already has.
+            if is_doover_registry(image_name):
+                app_id = (response or {}).get("id")
+                if not app_id:
+                    raise typer.BadParameter(
+                        "Could not determine the application id to mint a registry "
+                        "credential. Publish the app first."
+                    )
+                login_for_push(client, app_id)
+
+            if _is_multi_platform(build_args):
+                # buildx pushes as part of the build here; see the helper for why
+                # build-then-push cannot work for multi-platform.
+                detected_digest = _build_and_push_multi_platform(
+                    root_fp, build_args=build_args, image_name=image_name
+                )
+            else:
+                _build_container(
+                    root_fp,
+                    buildx=buildx,
+                    build_args=build_args,
+                    image_name=image_name,
+                )
+                _push_container(image_name)
+                detected_digest = _get_image_digest(image_name)
+
+            if detected_digest is None:
+                print(
+                    "Warning: could not determine the pushed image digest. "
+                    "Pass --digest to release against it explicitly."
+                )
         else:
             print("App requested to not build. Skipping build step.")
 
