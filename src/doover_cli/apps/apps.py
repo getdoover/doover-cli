@@ -1217,7 +1217,15 @@ def publish(
             # exercised. Other registries keep using whatever docker login the
             # user already has.
             if is_doover_registry(image_name, _control_base_url()):
-                app_id = (response or {}).get("id")
+                # `response` is an Application model on create/partial; fall back to
+                # resolving by name for the paths that don't return one.
+                app_id = getattr(response, "id", None)
+                if app_id is None and isinstance(response, dict):
+                    app_id = response.get("id")
+                if app_id is None:
+                    app_id = _resolve_application_id(
+                        client, app_config, staging=resolved_staging
+                    )
                 if not app_id:
                     raise typer.BadParameter(
                         "Could not determine the application id to mint a registry "

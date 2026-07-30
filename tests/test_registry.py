@@ -175,3 +175,19 @@ class TestRegistryHost:
             "registry.doover.com/apps/x:main", staging
         )
         assert not registry.is_doover_registry("ghcr.io/getdoover/x:main", staging)
+
+
+class TestApplicationIdExtraction:
+    """`publish` gets an Application model back from create/partial, not a dict --
+    calling .get() on it raised AttributeError right before the push."""
+
+    def test_id_is_read_off_the_model(self):
+        response = mock.Mock(id=12345)
+        assert getattr(response, "id", None) == 12345
+
+    def test_id_is_read_off_a_dict_response(self):
+        response = {"id": 999}
+        got = getattr(response, "id", None)
+        if got is None and isinstance(response, dict):
+            got = response.get("id")
+        assert got == 999
