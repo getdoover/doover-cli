@@ -7,6 +7,7 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from urllib.parse import urlencode
@@ -29,6 +30,7 @@ from ..ui_schema import export as export_ui_command
 from ..utils.api import ProfileAnnotation
 from ..registry import is_doover_registry, login_for_push, publish_github_output
 from ..utils.apps import (
+    discover_apps,
     get_app_directory,
     call_with_uv,
     get_docker_path,
@@ -1257,6 +1259,45 @@ def publish(
 
     print("\n\nDone!")
     renderer.render(response)
+
+
+@app.command()
+def discover(
+    root: Annotated[Path, typer.Argument(help="Repository root to search.")] = Path(),
+    as_json: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Emit a single-line JSON array, suitable for a CI matrix.",
+        ),
+    ] = False,
+):
+    """List every application in this repository and how to build it.
+
+    Handles both shapes a repo can take: several app entries in one
+    doover_config.json, and several self-contained app directories each with their
+    own. CI reads this to build its matrix instead of the workflow hard-coding app
+    names, which is what lets one workflow file serve every app repo.
+    """
+    found = discover_apps(root)
+    if not found:
+        print(
+            f"No applications found under {root}. Each app needs a "
+            f"doover_config.json with a `type` set.",
+            file=sys.stderr,
+        )
+        raise typer.Exit(1)
+
+    if as_json:
+        # Compact and on one line so it can be captured straight into a step output.
+        print(json.dumps(found, separators=(",", ":")))
+        raise typer.Exit(0)
+
+    for entry in found:
+        bits = [entry["type"] or "?", entry["language"] or "unknown language"]
+        if entry["widget"]:
+            bits.append("widget")
+        print(f"{entry['name']:<40} {entry['dir']:<24} {', '.join(bits)}")
 
 
 @app.command(name="registry-login")
