@@ -966,7 +966,13 @@ def publish(
     ] = Path(),
     build_container: Annotated[
         bool,
-        typer.Option(help="Build and push the container image to the registry."),
+        typer.Option(
+            # `--build` is the name this is known by; the longer form is kept so
+            # existing scripts and CI keep working.
+            "--build/--no-build",
+            "--build-container/--no-build-container",
+            help="Build and push the container image to the registry.",
+        ),
     ] = False,
     staging: Annotated[
         bool | None,
