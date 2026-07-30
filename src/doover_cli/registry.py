@@ -22,6 +22,7 @@ stdin and expects ``{"ServerURL","Username","Secret"}`` on stdout for ``get``.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 
@@ -119,6 +120,23 @@ def is_doover_registry(image_name: str | None) -> bool:
         return False
     host = image_name.split("/", 1)[0]
     return host.split(":")[0].lower() == DEFAULT_REGISTRY
+
+
+def publish_github_output(image: str) -> None:
+    """Expose the image reference to later workflow steps.
+
+    Lets a workflow stay identical across app repos: the reference comes from the
+    app's own doover_config.json rather than being spelled out in the yaml, which
+    also removes the chance of it drifting from the registered image name.
+    """
+    output_path = os.environ.get("GITHUB_OUTPUT")
+    if not output_path:
+        return
+    try:
+        with open(output_path, "a", encoding="utf-8") as fh:
+            fh.write(f"image={image}\n")
+    except OSError as e:
+        print(f"could not write GITHUB_OUTPUT: {e}", file=sys.stderr)
 
 
 def login_for_push(control_client, application_id: int | str) -> str:

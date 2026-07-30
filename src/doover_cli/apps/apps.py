@@ -27,7 +27,7 @@ import questionary
 from ..config_schema import export as export_config_command
 from ..ui_schema import export as export_ui_command
 from ..utils.api import ProfileAnnotation
-from ..registry import is_doover_registry, login_for_push
+from ..registry import is_doover_registry, login_for_push, publish_github_output
 from ..utils.apps import (
     get_app_directory,
     call_with_uv,
@@ -1297,6 +1297,9 @@ def registry_login(
         )
 
     target = login_for_push(client, app_id)
+    # Emitted so the build step can tag from the app's registered image name
+    # instead of the workflow repeating it.
+    publish_github_output(target)
     print(f"Logged in to push {target}")
 
 
