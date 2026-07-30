@@ -1210,7 +1210,7 @@ def publish(
             # app's repository, minted against the publish permission we just
             # exercised. Other registries keep using whatever docker login the
             # user already has.
-            if is_doover_registry(image_name):
+            if is_doover_registry(image_name, _control_base_url()):
                 app_id = (response or {}).get("id")
                 if not app_id:
                     raise typer.BadParameter(

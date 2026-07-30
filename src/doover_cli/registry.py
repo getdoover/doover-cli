@@ -29,6 +29,23 @@ import sys
 DEFAULT_REGISTRY = "registry.doover.com"
 
 
+def registry_host(control_base_url: str | None = None) -> str:
+    """The registry that belongs to a given control plane.
+
+    Derived rather than configured: every environment names its hosts the same
+    way, so api.doover.com pairs with registry.doover.com and
+    api.staging.udoover.com with registry.staging.udoover.com. Hardcoding the
+    production host meant a staging image was not recognised as ours, so no
+    credential was minted and the push failed with a bare 401.
+    """
+    if not control_base_url:
+        return DEFAULT_REGISTRY
+    host = control_base_url.split("://", 1)[-1].split("/", 1)[0].split(":")[0]
+    if host.startswith("api."):
+        return "registry." + host[len("api.") :]
+    return DEFAULT_REGISTRY
+
+
 def _docker_config_path():
     from pathlib import Path
 
@@ -113,13 +130,16 @@ def credential_helper() -> None:
     print(json.dumps({"ServerURL": server_url, "Username": "doover", "Secret": token}))
 
 
-def is_doover_registry(image_name: str | None) -> bool:
-    """Whether an image lives on the doover registry, and so needs a credential
-    minted by the control plane rather than the user's own docker login."""
+def is_doover_registry(
+    image_name: str | None, control_base_url: str | None = None
+) -> bool:
+    """Whether an image lives on this environment's doover registry, and so needs
+    a credential minted by the control plane rather than the user's own docker
+    login."""
     if not image_name:
         return False
-    host = image_name.split("/", 1)[0]
-    return host.split(":")[0].lower() == DEFAULT_REGISTRY
+    host = image_name.split("/", 1)[0].split(":")[0].lower()
+    return host == registry_host(control_base_url)
 
 
 def publish_github_output(image: str) -> None:

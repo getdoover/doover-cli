@@ -5,7 +5,7 @@ from typer import Typer
 
 from doover_cli.api import DooverCLIAuthClient
 
-from .registry import DEFAULT_REGISTRY, register_credential_helper
+from .registry import register_credential_helper, registry_host
 
 from .utils.sentry import capture_handled_exception
 from .utils.state import state
@@ -55,10 +55,12 @@ def login(
     # written to disk. Best-effort: failing to edit the user's docker config is
     # not a reason to fail the login.
     try:
-        if register_credential_helper():
+        # Register the registry that belongs to the environment just logged into,
+        # so a staging login makes staging images pullable rather than production's.
+        if register_credential_helper(registry_host(auth.control_base_url)):
             print(
                 "Configured docker to use your Doover login for "
-                f"{DEFAULT_REGISTRY} images."
+                f"{registry_host(auth.control_base_url)} images."
             )
     except Exception:
         if state.debug:
