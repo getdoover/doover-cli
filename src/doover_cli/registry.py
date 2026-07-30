@@ -26,6 +26,11 @@ import os
 import subprocess
 import sys
 
+
+class RegistryLoginError(RuntimeError):
+    """`docker login` to the registry failed, carrying what docker reported."""
+
+
 DEFAULT_REGISTRY = "registry.doover.com"
 
 
@@ -168,11 +173,18 @@ def login_for_push(control_client, application_id: int | str) -> str:
     """
     result = control_client.mint_registry_token(application_id)
     registry = result["registry"]
-    subprocess.run(
+    completed = subprocess.run(
         ["docker", "login", registry, "-u", result["username"], "--password-stdin"],
         input=result["password"],
         text=True,
-        check=True,
         capture_output=True,
     )
+    if completed.returncode != 0:
+        # Surface what docker said. Swallowing it leaves only a
+        # CalledProcessError, which says nothing about whether the registry was
+        # unreachable, the certificate was wrong, or the token was rejected.
+        detail = (completed.stderr or completed.stdout or "").strip()
+        raise RegistryLoginError(
+            f"docker login to {registry} failed: {detail or 'no output from docker'}"
+        )
     return f"{registry}/{result['repository']}"

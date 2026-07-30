@@ -123,6 +123,31 @@ class TestIsDooverRegistry:
 
 
 class TestLoginForPush:
+    def test_a_failed_login_reports_what_docker_said(self):
+        """Otherwise the only signal is a CalledProcessError, which says nothing
+        about whether the registry was unreachable, the certificate was wrong, or
+        the token was rejected."""
+        client = mock.MagicMock()
+        client.mint_registry_token.return_value = {
+            "registry": "registry.staging.udoover.com",
+            "repository": "apps/foo",
+            "username": "doover",
+            "password": "secret-token",
+        }
+        with mock.patch("doover_cli.registry.subprocess.run") as run:
+            run.return_value = mock.Mock(
+                returncode=1,
+                stderr="Error response from daemon: login attempt failed",
+                stdout="",
+            )
+            with pytest.raises(registry.RegistryLoginError) as exc:
+                registry.login_for_push(client, 123)
+
+        assert "registry.staging.udoover.com" in str(exc.value)
+        assert "login attempt failed" in str(exc.value)
+        # never the credential itself
+        assert "secret-token" not in str(exc.value)
+
     def test_pipes_the_credential_over_stdin(self):
         """Never on the command line, where it would land in the process list."""
         client = mock.MagicMock()
@@ -133,6 +158,7 @@ class TestLoginForPush:
             "password": "secret-token",
         }
         with mock.patch("doover_cli.registry.subprocess.run") as run:
+            run.return_value = mock.Mock(returncode=0, stderr="", stdout="")
             target = registry.login_for_push(client, 123)
 
         assert target == "registry.doover.com/apps/foo"
