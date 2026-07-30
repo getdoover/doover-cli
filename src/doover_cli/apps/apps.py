@@ -1259,6 +1259,47 @@ def publish(
     renderer.render(response)
 
 
+@app.command(name="registry-login")
+def registry_login(
+    app_fp: Annotated[
+        Path, typer.Argument(help="Path to the application directory.")
+    ] = Path(),
+    app_name: Annotated[
+        str | None,
+        typer.Option(help="Which app in doover_config.json, if it defines several."),
+    ] = None,
+    staging: Annotated[
+        bool | None,
+        typer.Option(help="Force staging mode. Defaults to matching the API URL."),
+    ] = None,
+):
+    """`docker login` to the Doover registry for this application.
+
+    For CI, which builds with buildx rather than `publish --build` and so needs
+    the credential in place beforehand. The token is scoped to this application's
+    repository only, and is piped straight into docker -- it is never printed, so
+    it cannot end up in a workflow log or a step output.
+
+    Publish the app first: the credential is minted against its publish
+    permission, and the repository comes from its registered image name.
+    """
+    client, _ = get_state()
+    root_fp = get_app_directory(app_fp)
+    app_config = get_app_config(root_fp, app_name=app_name)
+
+    app_id = _resolve_application_id(
+        client, app_config, staging=_resolve_staging(staging)
+    )
+    if app_id is None:
+        raise typer.BadParameter(
+            f"'{app_config.name}' does not exist yet. Run `doover app publish` "
+            f"before logging in to the registry."
+        )
+
+    target = login_for_push(client, app_id)
+    print(f"Logged in to push {target}")
+
+
 @app.command(name="release")
 def release_command(
     app_fp: Annotated[
