@@ -7,6 +7,8 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
+import tempfile
 import time
 from urllib.parse import urlencode
 from pathlib import Path
@@ -26,7 +28,10 @@ import questionary
 from ..config_schema import export as export_config_command
 from ..ui_schema import export as export_ui_command
 from ..utils.api import ProfileAnnotation
+from ..registry import is_doover_registry, login_for_push, publish_github_output
 from ..utils.apps import (
+    PACKAGE_APP_TYPES,
+    discover_apps,
     get_app_directory,
     call_with_uv,
     get_docker_path,
@@ -120,12 +125,49 @@ def _detect_git_commit(root_fp: Path) -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
+def _is_multi_platform(build_args: str) -> bool:
+    """Whether `build_args` asks for more than one platform.
+
+    Multi-platform changes how the image has to be built: buildx cannot load a
+    multi-platform result into the local daemon, so it must push directly, and
+    the digest has to come from buildx rather than the daemon.
+    """
+    for token in ("--platform", "--platform="):
+        if token in build_args:
+            tail = build_args.split(token, 1)[1].lstrip("= ").split()[0]
+            return "," in tail
+    return False
+
+
 def _build_container(
     root_fp: Path, *, buildx: bool, build_args: str, image_name: str
 ) -> None:
     shell_run(
         f"docker {'buildx' if buildx else ''} build {build_args} -t {image_name} {str(root_fp)}",
     )
+
+
+def _build_and_push_multi_platform(
+    root_fp: Path, *, build_args: str, image_name: str
+) -> str | None:
+    """Build and push a multi-platform image in one step, returning its digest.
+
+    A multi-platform build cannot be loaded into the local daemon, so `build`
+    then `push` does not work -- and `docker inspect` afterwards reports either
+    nothing or the single-platform digest, not the index. buildx writes the real
+    digest to a metadata file, which is the only reliable source.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        metadata_fp = Path(tmp) / "metadata.json"
+        shell_run(
+            f"docker buildx build {build_args} --push "
+            f"--metadata-file {metadata_fp} -t {image_name} {str(root_fp)}",
+        )
+        try:
+            metadata = json.loads(metadata_fp.read_text())
+        except (OSError, ValueError):
+            return None
+    return metadata.get("containerimage.digest")
 
 
 def _push_container(image_name: str) -> None:
@@ -925,7 +967,13 @@ def publish(
     ] = Path(),
     build_container: Annotated[
         bool,
-        typer.Option(help="Build and push the container image to the registry."),
+        typer.Option(
+            # `--build` is the name this is known by; the longer form is kept so
+            # existing scripts and CI keep working.
+            "--build/--no-build",
+            "--build-container/--no-build-container",
+            help="Build and push the container image to the registry.",
+        ),
     ] = False,
     staging: Annotated[
         bool | None,
@@ -1123,7 +1171,7 @@ def publish(
                 )
             rich.print("[green]Widget uploaded.[/green]")
 
-    if app_config.type in ("PRO", "REP", "INT"):
+    if app_config.type in PACKAGE_APP_TYPES:
         if build_package:
             print("\nBuilding package.zip for upload...")
             shell_run("./build.sh", cwd=root_fp)
@@ -1164,14 +1212,49 @@ def publish(
         build_args = getattr(app_config, "build_args", "") or ""
         if build_args != "NO_BUILD":
             print("\nBuilding and pushing container image to the registry...")
-            _build_container(
-                root_fp,
-                buildx=buildx,
-                build_args=build_args,
-                image_name=image_name,
-            )
-            _push_container(image_name)
-            detected_digest = _get_image_digest(image_name)
+
+            # Pushing to the doover registry needs a credential scoped to this
+            # app's repository, minted against the publish permission we just
+            # exercised. Other registries keep using whatever docker login the
+            # user already has.
+            if is_doover_registry(image_name, _control_base_url()):
+                # `response` is an Application model on create/partial; fall back to
+                # resolving by name for the paths that don't return one.
+                app_id = getattr(response, "id", None)
+                if app_id is None and isinstance(response, dict):
+                    app_id = response.get("id")
+                if app_id is None:
+                    app_id = _resolve_application_id(
+                        client, app_config, staging=resolved_staging
+                    )
+                if not app_id:
+                    raise typer.BadParameter(
+                        "Could not determine the application id to mint a registry "
+                        "credential. Publish the app first."
+                    )
+                login_for_push(client, app_id)
+
+            if _is_multi_platform(build_args):
+                # buildx pushes as part of the build here; see the helper for why
+                # build-then-push cannot work for multi-platform.
+                detected_digest = _build_and_push_multi_platform(
+                    root_fp, build_args=build_args, image_name=image_name
+                )
+            else:
+                _build_container(
+                    root_fp,
+                    buildx=buildx,
+                    build_args=build_args,
+                    image_name=image_name,
+                )
+                _push_container(image_name)
+                detected_digest = _get_image_digest(image_name)
+
+            if detected_digest is None:
+                print(
+                    "Warning: could not determine the pushed image digest. "
+                    "Pass --digest to release against it explicitly."
+                )
         else:
             print("App requested to not build. Skipping build step.")
 
@@ -1191,6 +1274,89 @@ def publish(
 
     print("\n\nDone!")
     renderer.render(response)
+
+
+@app.command()
+def discover(
+    root: Annotated[Path, typer.Argument(help="Repository root to search.")] = Path(),
+    as_json: Annotated[
+        bool,
+        typer.Option(
+            "--json",
+            help="Emit a single-line JSON array, suitable for a CI matrix.",
+        ),
+    ] = False,
+):
+    """List every application in this repository and how to build it.
+
+    Handles both shapes a repo can take: several app entries in one
+    doover_config.json, and several self-contained app directories each with their
+    own. CI reads this to build its matrix instead of the workflow hard-coding app
+    names, which is what lets one workflow file serve every app repo.
+    """
+    found = discover_apps(root)
+    if not found:
+        print(
+            f"No applications found under {root}. Each app needs a "
+            f"doover_config.json with a `type` set.",
+            file=sys.stderr,
+        )
+        raise typer.Exit(1)
+
+    if as_json:
+        # Compact and on one line so it can be captured straight into a step output.
+        print(json.dumps(found, separators=(",", ":")))
+        raise typer.Exit(0)
+
+    for entry in found:
+        bits = [entry["type"] or "?", entry["language"] or "unknown language"]
+        if entry["widget"]:
+            bits.append("widget")
+        print(f"{entry['name']:<40} {entry['dir']:<24} {', '.join(bits)}")
+
+
+@app.command(name="registry-login")
+def registry_login(
+    app_fp: Annotated[
+        Path, typer.Argument(help="Path to the application directory.")
+    ] = Path(),
+    app_name: Annotated[
+        str | None,
+        typer.Option(help="Which app in doover_config.json, if it defines several."),
+    ] = None,
+    staging: Annotated[
+        bool | None,
+        typer.Option(help="Force staging mode. Defaults to matching the API URL."),
+    ] = None,
+):
+    """`docker login` to the Doover registry for this application.
+
+    For CI, which builds with buildx rather than `publish --build` and so needs
+    the credential in place beforehand. The token is scoped to this application's
+    repository only, and is piped straight into docker -- it is never printed, so
+    it cannot end up in a workflow log or a step output.
+
+    Publish the app first: the credential is minted against its publish
+    permission, and the repository comes from its registered image name.
+    """
+    client, _ = get_state()
+    root_fp = get_app_directory(app_fp)
+    app_config = get_app_config(root_fp, app_name=app_name)
+
+    app_id = _resolve_application_id(
+        client, app_config, staging=_resolve_staging(staging)
+    )
+    if app_id is None:
+        raise typer.BadParameter(
+            f"'{app_config.name}' does not exist yet. Run `doover app publish` "
+            f"before logging in to the registry."
+        )
+
+    target = login_for_push(client, app_id)
+    # Emitted so the build step can tag from the app's registered image name
+    # instead of the workflow repeating it.
+    publish_github_output(target)
+    print(f"Logged in to push {target}")
 
 
 @app.command(name="release")

@@ -1,5 +1,6 @@
 import os
 import json
+import sys
 import base64
 import shutil
 import contextlib
@@ -511,3 +512,152 @@ def get_app_config(root_fp: Path, app_name: str | None = None) -> Any:
     ).ask()
     _selected_app_name[resolved] = choice
     return lookup[choice]
+
+
+# Directories that never contain an app but are expensive or misleading to walk.
+_DISCOVERY_SKIP_DIRS = frozenset(
+    {
+        ".git",
+        ".venv",
+        "venv",
+        "node_modules",
+        "target",
+        "dist",
+        "build",
+        "__pycache__",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        "site-packages",
+    }
+)
+
+
+def _detect_language(app_dir: Path) -> str | None:
+    """Which toolchain builds the app in `app_dir`.
+
+    Decided by the manifest sitting beside its doover_config.json, so a monorepo
+    can hold a Rust app next to a Python one.
+    """
+    if (app_dir / "Cargo.toml").exists():
+        return "rs"
+    if (app_dir / "pyproject.toml").exists():
+        return "py"
+    return None
+
+
+def _config_paths(root: Path) -> list[Path]:
+    """Every doover_config.json under `root`, nearest first."""
+    found = []
+    for path in root.rglob("doover_config.json"):
+        if any(part in _DISCOVERY_SKIP_DIRS for part in path.parts):
+            continue
+        found.append(path)
+    return sorted(found, key=lambda p: (len(p.parts), str(p)))
+
+
+# App types that ship a package.zip built by ./build.sh rather than a container
+# image. Kept here rather than inline so `apps.publish` and discovery cannot drift
+# on which types have an image.
+PACKAGE_APP_TYPES = ("PRO", "REP", "INT")
+
+
+def _parse_platforms(build_args: str | None) -> str | None:
+    """The platform list out of `build_args`, or None if it names none.
+
+    `build_args` is a raw argument string, so both `--platform x,y` and
+    `--platform=x,y` occur. Returned as the comma-separated string buildx expects
+    rather than a list, because that is what both the CLI and CI pass straight
+    through.
+    """
+    if not build_args:
+        return None
+    tokens = build_args.split()
+    for i, token in enumerate(tokens):
+        if token.startswith("--platform="):
+            return token.split("=", 1)[1] or None
+        if token == "--platform" and i + 1 < len(tokens):
+            return tokens[i + 1] or None
+    return None
+
+
+def discover_apps(root: Path | None = None) -> list[dict[str, Any]]:
+    """Every application in a repository, with what is needed to build it.
+
+    Handles both shapes a repo can take: several app entries in one
+    doover_config.json, and several self-contained app directories each with their
+    own. CI matrices and coding agents both read this rather than inferring layout,
+    so the contract is deliberately flat and stable:
+
+        dir        path to the app, relative to `root` (`.` for a root-level app)
+        name       application name, globally unique
+        type       DEV / PRO / ... straight from the config
+        language   "py" | "rs" | None when there is no source to build
+        builds_image  whether CI should build and push an image for it -- false for
+                   apps that deploy an off-the-shelf image, which are still DEV
+        widget     whether the app builds a UI widget
+        image_name registered image, or None for apps without one
+        platforms  comma-separated build platforms parsed out of `build_args`, or
+                   None to let the builder decide. CI passes this straight to
+                   buildx, so an app changes what it builds for by editing its own
+                   doover_config.json rather than the shared workflow.
+
+    An app that should be built but whose language cannot be determined is still
+    listed, with `language` null and a warning on stderr: one unrecognised app
+    should surface as that app failing, not as discovery refusing to report the
+    others.
+    """
+    root = (root or Path()).resolve()
+    apps: list[dict[str, Any]] = []
+
+    for config_path in _config_paths(root):
+        app_dir = config_path.parent
+        try:
+            data = json.loads(config_path.read_text())
+        except (OSError, ValueError) as e:
+            print(f"warning: could not read {config_path}: {e}", file=sys.stderr)
+            continue
+
+        language = _detect_language(app_dir)
+        has_dockerfile = (app_dir / "Dockerfile").exists()
+        rel = app_dir.relative_to(root)
+        for key, entry in data.items():
+            # `type` marks an app entry, matching get_app_config.
+            if not isinstance(entry, dict) or "type" not in entry:
+                continue
+            # Some apps deploy an off-the-shelf image and hold no source at all
+            # -- config plus a compose file. They are still DEV apps, so `type`
+            # cannot distinguish them; the absence of a Dockerfile can.
+            # Package-based apps are excluded even when a Dockerfile is present,
+            # because several apps can share one directory: analog-level-sensor's
+            # processor sits beside the device app in the root config, so the
+            # device app's Dockerfile made the processor look buildable and CI
+            # would have tried to push it to an empty tag. `has_dockerfile` is a
+            # property of the directory; the type is a property of the app.
+            builds_image = (
+                has_dockerfile
+                and entry.get("build_args") != "NO_BUILD"
+                and entry.get("type") not in PACKAGE_APP_TYPES
+            )
+            if builds_image and language is None:
+                print(
+                    f"warning: {config_path} has a Dockerfile but no "
+                    f"pyproject.toml or Cargo.toml -- cannot tell how to lint or "
+                    f"test it",
+                    file=sys.stderr,
+                )
+
+            apps.append(
+                {
+                    "dir": str(rel) if str(rel) != "." else ".",
+                    "name": entry.get("name") or key,
+                    "type": entry.get("type"),
+                    "language": language,
+                    "builds_image": builds_image,
+                    "widget": bool(entry.get("build_widget_command")),
+                    "image_name": entry.get("image_name"),
+                    "platforms": _parse_platforms(entry.get("build_args")),
+                }
+            )
+
+    return apps
