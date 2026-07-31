@@ -6,8 +6,11 @@ is no session rather than empty credentials (which would make docker retry
 anonymously and report a misleading 401).
 """
 
+import base64
 import io
 import json
+import stat
+import time
 from unittest import mock
 
 import pytest
@@ -23,8 +26,39 @@ def _run_helper(verb, stdin="registry.doover.com", monkeypatch=None):
     return out
 
 
+def _jwt(exp):
+    """A token carrying nothing but `exp`. The helper reads `exp` without
+    verifying, so no signature is needed."""
+    payload = base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode())
+    return f"header.{payload.rstrip(b'=').decode()}.signature"
+
+
+@pytest.fixture(autouse=True)
+def credential_store(tmp_path, monkeypatch):
+    """Redirect the credential store into a tmp path for every test in this file.
+
+    Autouse rather than opt-in: `store` writes a real file, and a test that
+    forgot to redirect it would scribble a bearer credential into the developer's
+    own ~/.doover and leak state into whatever ran next.
+    """
+    path = tmp_path / "registry-credentials.json"
+    monkeypatch.setattr(registry, "_credential_store_path", lambda: path)
+    return path
+
+
+def _store(entry, server="registry.doover.com"):
+    """Seed the redirected credential store, as a prior `docker login` would."""
+    registry._write_stored({server: entry})
+
+
+@pytest.fixture
+def env_token(monkeypatch):
+    """The CI path, where the session comes from the environment."""
+    monkeypatch.setenv("DOOVER_API_TOKEN", "env-token")
+
+
 class TestCredentialHelper:
-    def test_get_emits_the_session_token(self, monkeypatch):
+    def test_get_emits_the_session_token(self, monkeypatch, env_token):
         out = _run_helper("get", monkeypatch=monkeypatch)
         session = mock.MagicMock()
         session.auth.token = "tok-123"
@@ -39,7 +73,7 @@ class TestCredentialHelper:
         # ensure_token is what keeps a stored login from silently rotting
         session.auth.ensure_token.assert_called_once()
 
-    def test_missing_session_exits_non_zero(self, monkeypatch):
+    def test_missing_session_exits_non_zero(self, monkeypatch, env_token):
         """Docker treats empty credentials as "try anonymously", which surfaces
         as a confusing 401 rather than "you are not logged in"."""
         out = _run_helper("get", monkeypatch=monkeypatch)
@@ -52,7 +86,7 @@ class TestCredentialHelper:
         assert exc.value.code == 1
         assert out.getvalue() == ""
 
-    def test_empty_token_exits_non_zero(self, monkeypatch):
+    def test_empty_token_exits_non_zero(self, monkeypatch, env_token):
         out = _run_helper("get", monkeypatch=monkeypatch)
         session = mock.MagicMock()
         session.auth.token = None
@@ -64,16 +98,114 @@ class TestCredentialHelper:
         assert exc.value.code == 1
         assert out.getvalue() == ""
 
-    def test_store_and_erase_are_accepted(self, monkeypatch):
-        """docker calls these on login/logout; we hold no state of our own."""
-        for verb in ("store", "erase"):
-            _run_helper(verb, stdin="{}", monkeypatch=monkeypatch)
-            registry.credential_helper()  # must not raise
+    def test_no_matching_profile_exits_non_zero(self, monkeypatch):
+        """No DOOVER_API_TOKEN and no profile for this registry."""
+        out = _run_helper(
+            "get", stdin="registry.nope.example.com", monkeypatch=monkeypatch
+        )
+        monkeypatch.delenv("DOOVER_API_TOKEN", raising=False)
+        with mock.patch("pydoover.api.auth.ConfigManager") as manager:
+            manager.return_value.entries = {}
+            with pytest.raises(SystemExit) as exc:
+                registry.credential_helper()
+        assert exc.value.code == 1
+        assert out.getvalue() == ""
 
-    def test_list_returns_an_empty_object(self, monkeypatch):
+    def test_store_persists_the_credential(self, monkeypatch, credential_store):
+        """The whole point: `docker login`'s repo-scoped credential has to
+        survive to the push. Discarding it silently defeated `login_for_push`."""
+        secret = _jwt(time.time() + 1800)
+        _run_helper(
+            "store",
+            stdin=json.dumps(
+                {
+                    "ServerURL": "registry.doover.com",
+                    "Username": "doover",
+                    "Secret": secret,
+                }
+            ),
+            monkeypatch=monkeypatch,
+        )
+        registry.credential_helper()
+
+        assert json.loads(credential_store.read_text()) == {
+            "registry.doover.com": {"Username": "doover", "Secret": secret}
+        }
+
+    def test_store_is_written_readable_only_by_its_owner(
+        self, monkeypatch, credential_store
+    ):
+        _run_helper(
+            "store",
+            stdin=json.dumps({"ServerURL": "registry.doover.com", "Secret": "s"}),
+            monkeypatch=monkeypatch,
+        )
+        registry.credential_helper()
+        assert stat.S_IMODE(credential_store.stat().st_mode) == 0o600
+
+    def test_a_stored_credential_beats_the_session_token(self, monkeypatch, env_token):
+        """A public or core app grants no push through the session token at all,
+        so the brokered credential must win."""
+        secret = _jwt(time.time() + 1800)
+        _store({"Username": "ci", "Secret": secret})
+
+        out = _run_helper("get", monkeypatch=monkeypatch)
+        with mock.patch("doover_cli.api.session.DooverCLISession.from_env") as from_env:
+            registry.credential_helper()
+
+        payload = json.loads(out.getvalue())
+        assert payload["Secret"] == secret
+        assert payload["Username"] == "ci"
+        # The session is never consulted; that is what keeps the scope narrow.
+        from_env.assert_not_called()
+
+    def test_an_expired_credential_is_dropped_not_served(
+        self, monkeypatch, env_token, credential_store
+    ):
+        """Serving a dead token wastes a request; keeping it would shadow the
+        session token that still serves pulls."""
+        _store({"Username": "ci", "Secret": _jwt(time.time() - 5)})
+
+        out = _run_helper("get", monkeypatch=monkeypatch)
+        session = mock.MagicMock()
+        session.auth.token = "tok-123"
+        with mock.patch(
+            "doover_cli.api.session.DooverCLISession.from_env", return_value=session
+        ):
+            registry.credential_helper()
+
+        assert json.loads(out.getvalue())["Secret"] == "tok-123"
+        assert json.loads(credential_store.read_text()) == {}
+
+    def test_a_credential_without_an_exp_is_served(self, monkeypatch, env_token):
+        """Docker gave it to us; an opaque credential is not ours to expire."""
+        _store({"Username": "ci", "Secret": "opaque"})
+        out = _run_helper("get", monkeypatch=monkeypatch)
+        registry.credential_helper()
+        assert json.loads(out.getvalue())["Secret"] == "opaque"
+
+    def test_erase_removes_the_stored_credential(self, monkeypatch, credential_store):
+        _store({"Username": "ci", "Secret": "s"})
+        _run_helper("erase", monkeypatch=monkeypatch)
+        registry.credential_helper()
+        assert json.loads(credential_store.read_text()) == {}
+
+    def test_list_reports_what_is_stored(self, monkeypatch):
+        _store({"Username": "ci", "Secret": "s"})
+        out = _run_helper("list", monkeypatch=monkeypatch)
+        registry.credential_helper()
+        assert json.loads(out.getvalue()) == {"registry.doover.com": "ci"}
+
+    def test_list_is_empty_when_nothing_is_stored(self, monkeypatch):
         out = _run_helper("list", monkeypatch=monkeypatch)
         registry.credential_helper()
         assert json.loads(out.getvalue()) == {}
+
+    def test_a_malformed_store_payload_exits_non_zero(self, monkeypatch):
+        _run_helper("store", stdin="not json", monkeypatch=monkeypatch)
+        with pytest.raises(SystemExit) as exc:
+            registry.credential_helper()
+        assert exc.value.code == 1
 
 
 class TestRegisterCredentialHelper:

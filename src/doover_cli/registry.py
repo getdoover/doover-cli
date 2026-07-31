@@ -17,14 +17,25 @@ Two things live here:
 
 The helper protocol is deliberately minimal: docker writes a registry host on
 stdin and expects ``{"ServerURL","Username","Secret"}`` on stdout for ``get``.
+
+Registering the helper for a host means docker routes *every* credential
+operation for it here, ``store`` included -- so the helper has to persist what
+``docker login`` gives it. It used to discard it, which silently defeated
+``login_for_push``: the scoped credential went nowhere and the subsequent push
+fell back to the session token. For a PUBLIC or CORE app that token carries no
+push scope at all (doover-control's ``entitlements_for_user`` excludes those
+apps), so the brokered credential is not an optimisation, it is the only thing
+that can push.
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import subprocess
 import sys
+import time
 
 
 class RegistryLoginError(RuntimeError):
@@ -82,6 +93,117 @@ def register_credential_helper(registry: str = DEFAULT_REGISTRY) -> bool:
     return True
 
 
+def _credential_store_path():
+    from pathlib import Path
+
+    return Path.home() / ".doover" / "registry-credentials.json"
+
+
+def _read_stored() -> dict:
+    try:
+        entries = json.loads(_credential_store_path().read_text())
+    except (OSError, ValueError):
+        # Nothing stored, or a file we did not write. Falling back to the session
+        # token is always safe; the worst case is a clear entitlement error.
+        return {}
+    return entries if isinstance(entries, dict) else {}
+
+
+def _write_stored(entries: dict) -> None:
+    path = _credential_store_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # 0600 from the moment it exists: these are bearer credentials for pushing
+    # images, so the mode cannot be applied as an afterthought.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        json.dump(entries, fh)
+
+
+def _seconds_until_expiry(secret: str) -> float | None:
+    """Seconds left on `secret`, or None if it carries no readable `exp`.
+
+    Decoded without verifying the signature: the realm is the only thing that
+    needs to trust this token, and all the helper needs to know is whether
+    handing it to docker is pointless. A credential that is not a JWT is treated
+    as non-expiring -- docker gave it to us, so it is not ours to second-guess.
+    """
+    try:
+        payload = secret.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        exp = json.loads(base64.urlsafe_b64decode(payload))["exp"]
+        return float(exp) - time.time()
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError):
+        return None
+
+
+# A push credential lives 30 minutes. Handing docker one with only seconds left
+# buys a failed request rather than a completed upload.
+EXPIRY_MARGIN_SECONDS = 30
+
+
+def _token_for_registry(server_url: str) -> str:
+    """A session token valid for `server_url`'s environment.
+
+    Docker hands the helper a registry host and nothing else -- no `--profile`,
+    no environment -- so the profile has to be recovered from that host.
+    Whichever profile's control plane pairs with this registry is the one holding
+    the right token, which is the same pairing `registry_host` applies going the
+    other way.
+
+    Matched on the derived host rather than the profile *name*: several profiles
+    routinely point at the same environment under different names, and a staging
+    push must not be signed with a production token. For the same reason every
+    match is tried rather than just the first -- a long-lived config accumulates
+    profiles whose refresh token has since been invalidated, and one of those
+    sitting earlier in the file must not mask the one that still works.
+    """
+    # Imported here, not at module scope: docker invokes this on every registry
+    # operation, and the CLI's import graph is far too heavy to pay for that.
+    from .api.session import DooverCLISession
+
+    # Set in CI, where there is no profile config to read.
+    if os.environ.get("DOOVER_API_TOKEN"):
+        session = DooverCLISession.from_env()
+        session.auth.ensure_token()
+        if not session.auth.token:
+            # Returning an empty secret would make docker retry anonymously and
+            # report a 401 that looks like a permissions problem.
+            raise RuntimeError("session produced no token")
+        return session.auth.token
+
+    from pydoover.api.auth import ConfigManager
+
+    manager = ConfigManager()
+    candidates = []
+    for name, profile in manager.entries.items():
+        control_url = profile.control_base_url
+        if not profile.token or not control_url:
+            continue
+        host = control_url.split("://", 1)[-1].split("/", 1)[0].split(":")[0]
+        # `registry_host` falls back to production for anything that isn't an
+        # `api.` host, so a local profile would otherwise answer for
+        # registry.doover.com.
+        if host.startswith("api.") and registry_host(control_url) == server_url:
+            candidates.append(name)
+
+    if not candidates:
+        raise RuntimeError(f"no logged-in profile has a control plane for {server_url}")
+
+    failures = []
+    for name in candidates:
+        try:
+            session = DooverCLISession.from_profile(name, config_manager=manager)
+            session.auth.ensure_token()
+        except Exception as e:  # noqa: BLE001 - try the next profile
+            failures.append(f"{name}: {e}")
+            continue
+        if session.auth.token:
+            return session.auth.token
+        failures.append(f"{name}: no token after refresh")
+
+    raise RuntimeError("; ".join(failures))
+
+
 def credential_helper() -> None:
     """`docker-credential-doover` entry point.
 
@@ -92,13 +214,38 @@ def credential_helper() -> None:
     """
     verb = sys.argv[1] if len(sys.argv) > 1 else ""
 
-    # store/erase exist because docker calls them on `docker login`/`logout`. We
-    # hold no state of our own, so they succeed and do nothing.
-    if verb in ("store", "erase"):
-        sys.stdin.read()
+    # `docker login` sends the credential here as JSON. Keeping it is what makes
+    # a repo-scoped push credential survive to the push.
+    if verb == "store":
+        try:
+            entry = json.loads(sys.stdin.read())
+        except ValueError as e:
+            print(f"doover: malformed credential on stdin ({e})", file=sys.stderr)
+            raise SystemExit(1) from e
+        entries = _read_stored()
+        entries[entry.get("ServerURL") or DEFAULT_REGISTRY] = {
+            "Username": entry.get("Username") or "doover",
+            "Secret": entry.get("Secret") or "",
+        }
+        _write_stored(entries)
         return
+
+    # `docker logout` sends the bare host.
+    if verb == "erase":
+        entries = _read_stored()
+        if entries.pop(sys.stdin.read().strip(), None) is not None:
+            _write_stored(entries)
+        return
+
     if verb == "list":
-        print(json.dumps({}))
+        print(
+            json.dumps(
+                {
+                    server: entry.get("Username", "doover")
+                    for server, entry in _read_stored().items()
+                }
+            )
+        )
         return
     if verb != "get":
         print(f"unknown verb: {verb!r}", file=sys.stderr)
@@ -106,15 +253,31 @@ def credential_helper() -> None:
 
     server_url = sys.stdin.read().strip() or DEFAULT_REGISTRY
 
-    # Imported here, not at module scope: docker invokes this on every registry
-    # operation, and the CLI's import graph is far too heavy to pay for that.
-    from .api.session import DooverCLISession
+    # A stored credential wins over the session token: it is the narrow one the
+    # control plane brokered for a specific repository, and for a public or core
+    # app it is the only one that carries push at all.
+    stored = _read_stored().get(server_url)
+    if stored:
+        remaining = _seconds_until_expiry(stored.get("Secret", ""))
+        if remaining is None or remaining > EXPIRY_MARGIN_SECONDS:
+            print(
+                json.dumps(
+                    {
+                        "ServerURL": server_url,
+                        "Username": stored.get("Username", "doover"),
+                        "Secret": stored.get("Secret", ""),
+                    }
+                )
+            )
+            return
+        # Dropped rather than kept and skipped, so a dead push credential cannot
+        # keep shadowing the session token that would still serve pulls.
+        entries = _read_stored()
+        entries.pop(server_url, None)
+        _write_stored(entries)
 
     try:
-        session = DooverCLISession.from_env()
-        auth = session.auth
-        auth.ensure_token()
-        token = auth.token
+        token = _token_for_registry(server_url)
     except Exception as e:  # noqa: BLE001 - any failure means "not logged in"
         print(
             f"doover: no usable session for {server_url} ({e}).\n"
@@ -122,13 +285,6 @@ def credential_helper() -> None:
             file=sys.stderr,
         )
         raise SystemExit(1) from e
-
-    if not token:
-        print(
-            "doover: not logged in. Run `doover login` and try again.",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
 
     # The username is a label only -- the realm resolves the agent from the
     # token's claims and ignores it.

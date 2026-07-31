@@ -31,9 +31,6 @@ path = "src/doover_cli/__init__.py"
 
 [project.scripts]
 doover = "doover_cli:main"
-# Docker locates credential helpers by name on PATH, so installing the CLI is
-# what makes `docker pull registry.doover.com/...` work -- no separate binary to
-# distribute and nothing that can drift from the CLI's token handling.
 docker-credential-doover = "doover_cli.registry:credential_helper"
 
 [dependency-groups]
