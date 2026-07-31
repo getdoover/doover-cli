@@ -349,3 +349,84 @@ class TestApplicationIdExtraction:
         if got is None and isinstance(response, dict):
             got = response.get("id")
         assert got == 999
+
+
+class TestCredentialHelperInCI:
+    """GitHub Actions has no stored token and no profile config.
+
+    A push never reaches this path -- `docker login` stores the brokered
+    credential and `get` serves that -- but a *pull* does, and without the OIDC
+    branch the helper falls through to a profile config that does not exist on a
+    runner and exits 1.
+    """
+
+    @pytest.fixture(autouse=True)
+    def actions_env(self, monkeypatch):
+        monkeypatch.delenv("DOOVER_API_TOKEN", raising=False)
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        monkeypatch.setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "runner-token")
+
+    def test_get_uses_the_trusted_publisher_flow(self, monkeypatch):
+        monkeypatch.setenv("DOOVER_CONTROL_API_BASE_URL", "https://api.doover.com")
+        out = _run_helper("get", monkeypatch=monkeypatch)
+
+        session = mock.MagicMock()
+        session.auth.token = "oidc-token"
+        with mock.patch(
+            "doover_cli.api.session.DooverCLISession.from_trusted_publisher",
+            return_value=session,
+        ) as vend:
+            registry.credential_helper()
+
+        assert json.loads(out.getvalue())["Secret"] == "oidc-token"
+        assert vend.call_args.kwargs["control_base_url"] == "https://api.doover.com"
+
+    def test_an_unset_control_url_defaults_to_production(self, monkeypatch):
+        monkeypatch.delenv("DOOVER_CONTROL_API_BASE_URL", raising=False)
+        out = _run_helper("get", monkeypatch=monkeypatch)
+
+        session = mock.MagicMock()
+        session.auth.token = "oidc-token"
+        with mock.patch(
+            "doover_cli.api.session.DooverCLISession.from_trusted_publisher",
+            return_value=session,
+        ):
+            registry.credential_helper()
+
+        assert json.loads(out.getvalue())["Secret"] == "oidc-token"
+
+    def test_a_registry_from_another_environment_is_refused(self, monkeypatch):
+        """A staging workflow must not hand its token to the production registry.
+
+        The same host check the profile path applies -- otherwise the OIDC branch
+        would be a way around it.
+        """
+        monkeypatch.setenv(
+            "DOOVER_CONTROL_API_BASE_URL", "https://api.staging.udoover.com"
+        )
+        out = _run_helper("get", monkeypatch=monkeypatch)
+
+        with mock.patch(
+            "doover_cli.api.session.DooverCLISession.from_trusted_publisher"
+        ) as vend:
+            with pytest.raises(SystemExit) as exc:
+                registry.credential_helper()
+
+        assert exc.value.code == 1
+        assert out.getvalue() == ""
+        vend.assert_not_called()
+
+    def test_a_stored_credential_still_wins(self, monkeypatch):
+        """The brokered push credential must not be replaced by a session token
+        that carries no push scope."""
+        secret = _jwt(time.time() + 1800)
+        _store({"Username": "ci", "Secret": secret})
+        out = _run_helper("get", monkeypatch=monkeypatch)
+
+        with mock.patch(
+            "doover_cli.api.session.DooverCLISession.from_trusted_publisher"
+        ) as vend:
+            registry.credential_helper()
+
+        assert json.loads(out.getvalue())["Secret"] == secret
+        vend.assert_not_called()

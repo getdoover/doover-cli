@@ -161,15 +161,42 @@ def _token_for_registry(server_url: str) -> str:
     # operation, and the CLI's import graph is far too heavy to pay for that.
     from .api.session import DooverCLISession
 
-    # Set in CI, where there is no profile config to read.
-    if os.environ.get("DOOVER_API_TOKEN"):
-        session = DooverCLISession.from_env()
+    def token_from(session) -> str:
         session.auth.ensure_token()
         if not session.auth.token:
             # Returning an empty secret would make docker retry anonymously and
             # report a 401 that looks like a permissions problem.
             raise RuntimeError("session produced no token")
         return session.auth.token
+
+    # Set in CI, where there is no profile config to read.
+    if os.environ.get("DOOVER_API_TOKEN"):
+        return token_from(DooverCLISession.from_env())
+
+    # GitHub Actions with no stored token: the CLI authenticates over the
+    # trusted-publisher OIDC flow, and there is no profile to match on. A push
+    # never reaches here -- `docker login` stores the brokered credential and the
+    # `get` above serves it -- but a *pull* does, and without this the helper
+    # falls through to a profile config that does not exist on a runner.
+    from .utils.api import _trusted_publisher_provider
+
+    provider = _trusted_publisher_provider()
+    if provider:
+        control_url = os.environ.get("DOOVER_CONTROL_API_BASE_URL")
+        # Same host check as the profile path below: a workflow targeting one
+        # environment must not hand its token to another environment's registry.
+        if registry_host(control_url) != server_url:
+            raise RuntimeError(
+                f"this workflow targets {control_url or 'production'}, which does "
+                f"not serve {server_url}"
+            )
+        return token_from(
+            DooverCLISession.from_trusted_publisher(
+                provider=provider,
+                audience=os.environ.get("DOOVER_OIDC_AUDIENCE"),
+                control_base_url=control_url,
+            )
+        )
 
     from pydoover.api.auth import ConfigManager
 

@@ -30,6 +30,7 @@ from ..ui_schema import export as export_ui_command
 from ..utils.api import ProfileAnnotation
 from ..registry import is_doover_registry, login_for_push, publish_github_output
 from ..utils.apps import (
+    PACKAGE_APP_TYPES,
     discover_apps,
     get_app_directory,
     call_with_uv,
@@ -1170,7 +1171,7 @@ def publish(
                 )
             rich.print("[green]Widget uploaded.[/green]")
 
-    if app_config.type in ("PRO", "REP", "INT"):
+    if app_config.type in PACKAGE_APP_TYPES:
         if build_package:
             print("\nBuilding package.zip for upload...")
             shell_run("./build.sh", cwd=root_fp)

@@ -311,3 +311,89 @@ def test_retired_fields_are_never_published(tmp_path):
 
     for field in ("lambda_arn", "stars", "repo_branch", "code_repo_id"):
         assert field not in payload, field
+
+
+@pytest.mark.parametrize(
+    "build_args,expected",
+    [
+        # Both spellings occur: `build_args` is a raw argument string, not parsed
+        # options, so whichever form an app's author typed is what we get.
+        ("--platform linux/amd64,linux/arm64", "linux/amd64,linux/arm64"),
+        ("--platform=linux/arm64", "linux/arm64"),
+        ("--no-cache --platform linux/arm64 --pull", "linux/arm64"),
+        # None means "let the builder decide", which is not the same as a single
+        # native platform — CI passes it straight through to buildx.
+        ("--no-cache", None),
+        ("", None),
+        (None, None),
+        # A trailing `--platform` with nothing after it must not index past the end.
+        ("--build-arg X=1 --platform", None),
+    ],
+)
+def test_parse_platforms(build_args, expected):
+    assert apps_utils._parse_platforms(build_args) == expected
+
+
+def test_discover_reports_platforms_from_build_args(tmp_path):
+    """The shared CI workflow reads this to decide what buildx builds, so an app
+    changes its target platforms by editing its own config, not the workflow."""
+    (tmp_path / "Dockerfile").write_text("FROM scratch\n")
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\nversion='0'\n")
+    (tmp_path / "doover_config.json").write_text(
+        json.dumps(
+            {
+                "my_app": {
+                    "name": "my_app",
+                    "type": "DEV",
+                    "build_args": "--platform linux/amd64,linux/arm64",
+                    "image_name": "registry.doover.com/apps/my_app:main",
+                }
+            }
+        )
+    )
+
+    (app,) = apps_utils.discover_apps(tmp_path)
+    assert app["platforms"] == "linux/amd64,linux/arm64"
+    assert app["builds_image"] is True
+
+
+def test_discover_reports_no_platforms_when_build_args_names_none(tmp_path):
+    (tmp_path / "Dockerfile").write_text("FROM scratch\n")
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\nversion='0'\n")
+    (tmp_path / "doover_config.json").write_text(
+        json.dumps({"my_app": {"name": "my_app", "type": "DEV"}})
+    )
+
+    (app,) = apps_utils.discover_apps(tmp_path)
+    assert app["platforms"] is None
+
+
+def test_an_app_sharing_a_directory_does_not_inherit_its_neighbours_image(tmp_path):
+    """Two apps in one doover_config.json, one Dockerfile between them.
+
+    The real shape of analog-level-sensor: a device app that builds an image, and
+    a processor that ships a package.zip. `has_dockerfile` is a property of the
+    *directory* while the type is a property of the app, so without excluding
+    package types the processor looks buildable and CI pushes it to an empty tag.
+    """
+    (tmp_path / "Dockerfile").write_text("FROM scratch\n")
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\nversion='0'\n")
+    (tmp_path / "doover_config.json").write_text(
+        json.dumps(
+            {
+                "device": {
+                    "name": "device",
+                    "type": "DEV",
+                    "build_args": "--platform linux/arm64",
+                    "image_name": "registry.doover.com/apps/device:main",
+                },
+                "processor": {"name": "processor", "type": "PRO"},
+            }
+        )
+    )
+
+    found = {a["name"]: a for a in apps_utils.discover_apps(tmp_path)}
+    assert found["device"]["builds_image"] is True
+    assert found["processor"]["builds_image"] is False
+    # Both are still reported -- the processor is published, just not as an image.
+    assert set(found) == {"device", "processor"}

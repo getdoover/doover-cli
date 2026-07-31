@@ -591,7 +591,7 @@ requires-dist = [
     { name = "jsf", specifier = ">=0.11.2" },
     { name = "paramiko", specifier = ">=3.5.1" },
     { name = "prompt-toolkit", specifier = ">=3.0.52" },
-    { name = "pydoover", specifier = ">=1.5.1" },
+    { name = "pydoover", specifier = ">=1.12.0" },
     { name = "pytz", specifier = ">=2025.2" },
     { name = "questionary", specifier = ">=1.10.0" },
     { name = "requests", specifier = ">=2.32.3" },

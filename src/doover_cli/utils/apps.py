@@ -556,6 +556,31 @@ def _config_paths(root: Path) -> list[Path]:
     return sorted(found, key=lambda p: (len(p.parts), str(p)))
 
 
+# App types that ship a package.zip built by ./build.sh rather than a container
+# image. Kept here rather than inline so `apps.publish` and discovery cannot drift
+# on which types have an image.
+PACKAGE_APP_TYPES = ("PRO", "REP", "INT")
+
+
+def _parse_platforms(build_args: str | None) -> str | None:
+    """The platform list out of `build_args`, or None if it names none.
+
+    `build_args` is a raw argument string, so both `--platform x,y` and
+    `--platform=x,y` occur. Returned as the comma-separated string buildx expects
+    rather than a list, because that is what both the CLI and CI pass straight
+    through.
+    """
+    if not build_args:
+        return None
+    tokens = build_args.split()
+    for i, token in enumerate(tokens):
+        if token.startswith("--platform="):
+            return token.split("=", 1)[1] or None
+        if token == "--platform" and i + 1 < len(tokens):
+            return tokens[i + 1] or None
+    return None
+
+
 def discover_apps(root: Path | None = None) -> list[dict[str, Any]]:
     """Every application in a repository, with what is needed to build it.
 
@@ -572,6 +597,10 @@ def discover_apps(root: Path | None = None) -> list[dict[str, Any]]:
                    apps that deploy an off-the-shelf image, which are still DEV
         widget     whether the app builds a UI widget
         image_name registered image, or None for apps without one
+        platforms  comma-separated build platforms parsed out of `build_args`, or
+                   None to let the builder decide. CI passes this straight to
+                   buildx, so an app changes what it builds for by editing its own
+                   doover_config.json rather than the shared workflow.
 
     An app that should be built but whose language cannot be determined is still
     listed, with `language` null and a warning on stderr: one unrecognised app
@@ -599,7 +628,17 @@ def discover_apps(root: Path | None = None) -> list[dict[str, Any]]:
             # Some apps deploy an off-the-shelf image and hold no source at all
             # -- config plus a compose file. They are still DEV apps, so `type`
             # cannot distinguish them; the absence of a Dockerfile can.
-            builds_image = has_dockerfile and entry.get("build_args") != "NO_BUILD"
+            # Package-based apps are excluded even when a Dockerfile is present,
+            # because several apps can share one directory: analog-level-sensor's
+            # processor sits beside the device app in the root config, so the
+            # device app's Dockerfile made the processor look buildable and CI
+            # would have tried to push it to an empty tag. `has_dockerfile` is a
+            # property of the directory; the type is a property of the app.
+            builds_image = (
+                has_dockerfile
+                and entry.get("build_args") != "NO_BUILD"
+                and entry.get("type") not in PACKAGE_APP_TYPES
+            )
             if builds_image and language is None:
                 print(
                     f"warning: {config_path} has a Dockerfile but no "
@@ -617,6 +656,7 @@ def discover_apps(root: Path | None = None) -> list[dict[str, Any]]:
                     "builds_image": builds_image,
                     "widget": bool(entry.get("build_widget_command")),
                     "image_name": entry.get("image_name"),
+                    "platforms": _parse_platforms(entry.get("build_args")),
                 }
             )
 
