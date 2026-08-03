@@ -1303,6 +1303,9 @@ def discover(
         )
         raise typer.Exit(1)
 
+    for entry in found:
+        entry["dir"] = os.path.normpath(os.path.join(root, entry["dir"]))
+
     if as_json:
         # Compact and on one line so it can be captured straight into a step output.
         print(json.dumps(found, separators=(",", ":")))
