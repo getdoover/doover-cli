@@ -8,6 +8,7 @@ import typer
 import jsf
 
 from .utils.apps import (
+    app_names_in_config,
     get_app_directory,
     call_with_uv,
     get_app_config,
@@ -94,10 +95,12 @@ def validate(
     config_file = root_fp / "doover_config.json"
 
     if export_ is True:
-        # Validate the schema the Python *currently* generates, without leaving
-        # doover_config.json modified (e.g. when run as a pre-commit hook).
+        targets = [app_name] if app_name else app_names_in_config(root_fp) or [None]
         with preserve_file(config_file):
-            ctx.invoke(export, ctx, app_fp=root_fp, validate_=False, app_name=app_name)
+            for target in targets:
+                ctx.invoke(
+                    export, ctx, app_fp=root_fp, validate_=False, app_name=target
+                )
             _validate_config_file(config_file)
     else:
         _validate_config_file(config_file)

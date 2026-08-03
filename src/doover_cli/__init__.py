@@ -1,7 +1,7 @@
 from doover_cli.renderer import Renderer
 from typing import Annotated, Optional
 
-__version__ = "0.6.2"
+__version__ = "0.6.3"
 
 import click
 import typer

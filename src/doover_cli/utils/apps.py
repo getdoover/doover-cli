@@ -459,6 +459,29 @@ def get_docker_path() -> Path:
 _selected_app_name: dict[Path, str] = {}
 
 
+def app_names_in_config(root_fp: Path) -> list[str]:
+    """Every app name declared in this directory's doover_config.json.
+
+    Never prompts, unlike `get_app_config`. For commands that act on the whole
+    file rather than one app — schema validation checks every app's schema, so
+    prompting for one would be asking a question whose answer does not matter, and
+    aborts outright when stdin is not a terminal (pre-commit, CI).
+    """
+    config_path = root_fp / "doover_config.json"
+    if not config_path.exists():
+        return []
+
+    with open(config_path, "r") as file:
+        data = json.load(file)
+
+    # Same rule as get_app_config: `type` marks an app entry.
+    return [
+        v.get("name") or k
+        for k, v in data.items()
+        if isinstance(v, dict) and "type" in v
+    ]
+
+
 def get_app_config(root_fp: Path, app_name: str | None = None) -> Any:
     config_path = root_fp / "doover_config.json"
     if not config_path.exists():
