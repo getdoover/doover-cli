@@ -194,6 +194,150 @@ def _get_image_digest(image_name: str) -> str | None:
     return None
 
 
+def _repository_of(image_name: str) -> str:
+    """`image_name` without its tag, so a digest can be appended to it."""
+    repository, sep, tail = image_name.rpartition(":")
+    # A colon in the last path segment is a tag; one before a `/` is a port.
+    if sep and "/" not in tail:
+        return repository
+    return image_name
+
+
+# What the registry says when a manifest genuinely is not there, as opposed to
+# the many other reasons a lookup can fail -- an expired token being the likely
+# one, since the credential minted for a push is short-lived.
+_NOT_FOUND_MARKERS = ("not found", "manifest unknown", "manifest_unknown")
+
+PRESENT, MISSING, UNKNOWN = "present", "missing", "unknown"
+
+
+def _read_manifest(ref: str) -> tuple[str, dict | None]:
+    """Look `ref` up in the registry: (PRESENT | MISSING | UNKNOWN, manifest).
+
+    Goes through `imagetools`, not a direct registry request, so it reuses
+    whatever `docker login` already established -- including credential helpers,
+    which is what the doover registry uses.
+
+    MISSING and UNKNOWN have to be told apart: only the first is evidence of a
+    bad push. Reporting a lapsed credential as a missing manifest would fail
+    publishes for a reason that has nothing to do with the image.
+    """
+    try:
+        result = subprocess.run(
+            ["docker", "buildx", "imagetools", "inspect", "--raw", ref],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return UNKNOWN, None
+
+    if result.returncode != 0:
+        stderr = (result.stderr or "").lower()
+        if any(marker in stderr for marker in _NOT_FOUND_MARKERS):
+            return MISSING, None
+        return UNKNOWN, None
+
+    try:
+        return PRESENT, json.loads(result.stdout)
+    except ValueError:
+        return UNKNOWN, None
+
+
+def _is_attestation(child: dict) -> bool:
+    """Whether an index entry is buildx provenance rather than a runnable image.
+
+    buildx records attestations as extra children with an `unknown/unknown`
+    platform, which is how a pull knows to skip them.
+    """
+    if child.get("annotations", {}).get("vnd.docker.reference.type"):
+        return True
+    platform = child.get("platform") or {}
+    return platform.get("architecture") == "unknown" and platform.get("os") == "unknown"
+
+
+_INDEX_MEDIA_TYPES = frozenset(
+    {
+        "application/vnd.oci.image.index.v1+json",
+        "application/vnd.docker.distribution.manifest.list.v2+json",
+    }
+)
+
+
+def _verify_pushed_image(image_name: str, digest: str | None) -> None:
+    """Fail unless the registry can serve every manifest the push referenced.
+
+    A multi-platform push uploads the per-platform manifests and then the index
+    that points at them. If a registry keeps the index but not its children, the
+    tag still resolves for whoever pushed it -- their build cache has the
+    children -- and every device fails to pull it with "manifest unknown". Docker
+    does not report that as a failed push, and a release would then pin a digest
+    nothing can pull, so the check belongs here: at publish time, where it is
+    still one command to re-run.
+    """
+    reference = f"{_repository_of(image_name)}@{digest}" if digest else image_name
+
+    state_, index = _read_manifest(reference)
+    if state_ == MISSING:
+        rich.print(
+            f"[bold red]Pushed image {reference} is not in the registry.[/bold red] "
+            "The push reported success, so this is a registry-side rejection "
+            "rather than a build failure."
+        )
+        raise typer.Exit(1)
+    if state_ == UNKNOWN:
+        rich.print(
+            f"Warning: could not read {reference} back from the registry, so the "
+            "push was not verified."
+        )
+        return
+
+    if index.get("mediaType") not in _INDEX_MEDIA_TYPES:
+        return
+
+    repository = _repository_of(image_name)
+    missing = [
+        child
+        for child in index.get("manifests", [])
+        if child.get("digest")
+        and _read_manifest(f"{repository}@{child['digest']}")[0] == MISSING
+    ]
+
+    # A missing attestation is not a broken image: a pull resolves the index by
+    # platform and never asks for the `unknown/unknown` entries buildx adds for
+    # provenance. Say so, but do not fail a publish over it.
+    runnable = [child for child in missing if not _is_attestation(child)]
+    if missing and not runnable:
+        rich.print(
+            f"Warning: {len(missing)} attestation manifest(s) referenced by "
+            f"{reference} are not in the registry. Pulls are unaffected."
+        )
+        return
+    if not runnable:
+        return
+    missing = runnable
+
+    rich.print(
+        f"[bold red]Incomplete push: the registry has the image index for "
+        f"{reference} but not {len(missing)} of the platform manifests it "
+        "references.[/bold red]\nAnything pulling this image will fail with "
+        "'manifest unknown'. Missing:"
+    )
+    for child in missing:
+        platform = child.get("platform") or {}
+        described = (
+            f"{platform.get('os', '?')}/{platform.get('architecture', '?')}"
+            if platform
+            else "no platform"
+        )
+        rich.print(f"  {child['digest']}  ({described})")
+    rich.print(
+        "The registry accepted the index but not everything it points at. "
+        "Nothing is released against this digest."
+    )
+    raise typer.Exit(1)
+
+
 def _require_publish_value(
     name: str, value, *, allow_empty_list: bool = False, allow_none: bool = False
 ):
@@ -1282,6 +1426,8 @@ def publish(
                     "Warning: could not determine the pushed image digest. "
                     "Pass --digest to release against it explicitly."
                 )
+
+            _verify_pushed_image(image_name, detected_digest)
         else:
             print("App requested to not build. Skipping build step.")
 
@@ -1387,6 +1533,96 @@ def registry_login(
     # instead of the workflow repeating it.
     publish_github_output(target)
     print(f"Logged in to push {target}")
+
+
+@app.command(name="verify-releases")
+def verify_releases(
+    app_fp: Annotated[
+        Path, typer.Argument(help="Path to the application directory.")
+    ] = Path(),
+    app_name: Annotated[
+        str | None,
+        typer.Option(help="Which app in doover_config.json, if it defines several."),
+    ] = None,
+    staging: Annotated[
+        bool | None,
+        typer.Option(help="Force staging mode. Defaults to matching the API URL."),
+    ] = None,
+    _profile: ProfileAnnotation = None,
+):
+    """Check that every released version of an app can still be pulled.
+
+    Reads only. A release records a digest, and until the registry was fixed a
+    digest stopped resolving as soon as its tag moved on, so releases from before
+    then may already be gone with nothing else reporting it.
+
+    A release whose platform manifests have gone cannot be recovered: their bytes
+    went with them, so it has to be rebuilt and published again.
+    """
+    _ = _profile
+    client, _ = get_state()
+    root_fp = get_app_directory(app_fp)
+    app_config = get_app_config(root_fp, app_name=app_name)
+
+    application_id = _resolve_application_id(
+        client, app_config, staging=_resolve_staging(staging)
+    )
+    if application_id is None:
+        raise typer.BadParameter(f"'{app_config.name}' has not been published yet.")
+
+    versions = client.list_application_versions(application_id)
+    rows = versions.get("results", versions) if isinstance(versions, dict) else versions
+
+    broken = checked = 0
+    for version in sorted(rows, key=lambda v: v.get("number") or 0):
+        image = version.get("image_name") or ""
+        if "@" not in image or not is_doover_registry(image, _control_base_url()):
+            continue
+        checked += 1
+        digest_ = image.split("@", 1)[1]
+        state_, verdict = _release_state(image)
+        rich.print(f"  v{version.get('number'):<4} {digest_[:19]}  {verdict}")
+        if state_ == MISSING:
+            broken += 1
+
+    if not checked:
+        rich.print("No releases on the doover registry to check.")
+        return
+    if broken:
+        rich.print(
+            f"\n[bold red]{broken} of {checked} releases cannot be pulled.[/bold red] "
+            "Rebuild and republish them; the images cannot be recovered."
+        )
+        raise typer.Exit(1)
+    rich.print(f"\n[green]All {checked} releases are intact.[/green]")
+
+
+def _release_state(image: str) -> tuple[str, str]:
+    """Whether a released image is still pullable, and a line describing it."""
+    repository, digest = image.split("@", 1)
+    state_, index = _read_manifest(image)
+    if state_ == MISSING:
+        return MISSING, "[red]GONE[/red] -- no longer in the registry"
+    if state_ == UNKNOWN:
+        return UNKNOWN, "could not be read (credentials?)"
+
+    if index.get("mediaType") not in _INDEX_MEDIA_TYPES:
+        return PRESENT, "[green]pullable[/green]"
+
+    platforms = [c for c in index.get("manifests", []) if not _is_attestation(c)]
+    gone = [
+        c
+        for c in platforms
+        if _read_manifest(f"{repository}@{c['digest']}")[0] == MISSING
+    ]
+    if gone:
+        missing = ", ".join(
+            f"{(c.get('platform') or {}).get('os', '?')}/"
+            f"{(c.get('platform') or {}).get('architecture', '?')}"
+            for c in gone
+        )
+        return MISSING, f"[red]GONE[/red] -- missing platform manifests: {missing}"
+    return PRESENT, f"[green]pullable[/green] ({len(platforms)} platform(s))"
 
 
 @app.command(name="release")
