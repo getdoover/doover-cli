@@ -2,12 +2,18 @@ import re
 from contextlib import nullcontext
 from types import SimpleNamespace
 
+import pytest
+import typer
 from typer.testing import CliRunner
 
 from doover_cli import app
 from doover_cli.apps import apps as apps_app
 
 runner = CliRunner()
+
+# Captured before the autouse fixture in conftest replaces it, so the reader
+# itself can be tested rather than the stub.
+_READ_MANIFEST = apps_app._read_manifest
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -1123,6 +1129,367 @@ def test_app_publish_explicit_digest_overrides_detected_digest(monkeypatch, tmp_
 
     assert result.exit_code == 0
     assert captured["digest"] == "sha256:explicit"
+
+
+def test_app_publish_verifies_the_pushed_image(monkeypatch, tmp_path):
+    captured = {}
+    renderer = FakeRenderer()
+    app_config = FakeAppConfig(app_id=404)
+
+    class FakeApplicationsClient:
+        @staticmethod
+        def partial(application_id, body):
+            return {"id": 404}
+
+    class FakeControlClient:
+        applications = FakeApplicationsClient()
+
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_config", lambda root_fp, app_name=None: app_config
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_state", lambda: (FakeControlClient(), renderer)
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_config_command",
+        lambda ctx, app_fp, validate_: None,
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_ui_command",
+        lambda ctx, app_fp, validate_: None,
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps._build_container", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr("doover_cli.apps.apps._push_container", lambda image_name: None)
+    monkeypatch.setattr(
+        "doover_cli.apps.apps._get_image_digest",
+        lambda image_name: "sha256:detected",
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps._verify_pushed_image",
+        lambda image_name, digest: captured.update(verified=(image_name, digest)),
+    )
+
+    result = runner.invoke(
+        app,
+        ["app", "publish", str(tmp_path), "--build-container", "--no-release"],
+    )
+
+    assert result.exit_code == 0
+    assert captured["verified"] == (
+        "ghcr.io/getdoover/tracker-app:main",
+        "sha256:detected",
+    )
+
+
+def test_app_publish_pushes_multi_platform_in_one_step(monkeypatch, tmp_path):
+    captured = {}
+    renderer = FakeRenderer()
+    app_config = FakeAppConfig(app_id=606)
+    app_config.build_args = "--platform linux/amd64,linux/arm64"
+
+    class FakeApplicationsClient:
+        @staticmethod
+        def partial(application_id, body):
+            return {"id": 606}
+
+    class FakeControlClient:
+        applications = FakeApplicationsClient()
+
+    def fake_push(root_fp, **kwargs):
+        captured["push"] = kwargs
+        return "sha256:index"
+
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_config", lambda root_fp, app_name=None: app_config
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_state", lambda: (FakeControlClient(), renderer)
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_config_command",
+        lambda ctx, app_fp, validate_: None,
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_ui_command",
+        lambda ctx, app_fp, validate_: None,
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps._build_and_push_multi_platform", fake_push
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps._verify_pushed_image", lambda image_name, digest: None
+    )
+
+    result = runner.invoke(
+        app, ["app", "publish", str(tmp_path), "--build-container", "--no-release"]
+    )
+
+    assert result.exit_code == 0
+    assert captured["push"] == {
+        "build_args": "--platform linux/amd64,linux/arm64",
+        "image_name": "ghcr.io/getdoover/tracker-app:main",
+    }
+
+
+def test_verify_pushed_image_accepts_a_complete_index(monkeypatch):
+    manifests = {
+        "reg.example.com/apps/app@sha256:index": {
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "manifests": [{"digest": "sha256:amd64"}, {"digest": "sha256:arm64"}],
+        },
+        "reg.example.com/apps/app@sha256:amd64": {"mediaType": "manifest"},
+        "reg.example.com/apps/app@sha256:arm64": {"mediaType": "manifest"},
+    }
+    monkeypatch.setattr(
+        "doover_cli.apps.apps._read_manifest",
+        lambda ref: (
+            (apps_app.PRESENT, manifests[ref])
+            if ref in manifests
+            else (apps_app.MISSING, None)
+        ),
+    )
+
+    apps_app._verify_pushed_image(
+        "reg.example.com/apps/app:main", "sha256:index"
+    )  # no raise
+
+
+def test_verify_pushed_image_rejects_an_index_missing_a_child(monkeypatch, capsys):
+    """The dangling-index case: the tag resolves, the platform manifests do not."""
+    manifests = {
+        "reg.example.com/apps/app@sha256:index": {
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "manifests": [{"digest": "sha256:amd64"}, {"digest": "sha256:arm64"}],
+        },
+        "reg.example.com/apps/app@sha256:amd64": {"mediaType": "manifest"},
+    }
+    monkeypatch.setattr(
+        "doover_cli.apps.apps._read_manifest",
+        lambda ref: (
+            (apps_app.PRESENT, manifests[ref])
+            if ref in manifests
+            else (apps_app.MISSING, None)
+        ),
+    )
+
+    with pytest.raises(typer.Exit) as exc_info:
+        apps_app._verify_pushed_image("reg.example.com/apps/app:main", "sha256:index")
+
+    assert exc_info.value.exit_code == 1
+    assert "sha256:arm64" in _strip_ansi(capsys.readouterr().out)
+
+
+def test_release_state_reports_a_missing_platform_manifest(monkeypatch):
+    index = {
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        "manifests": [
+            {
+                "digest": "sha256:amd64",
+                "platform": {"os": "linux", "architecture": "amd64"},
+            },
+            {
+                "digest": "sha256:arm64",
+                "platform": {"os": "linux", "architecture": "arm64"},
+            },
+        ],
+    }
+    present = {
+        "reg.example.com/apps/app@sha256:index": index,
+        "reg.example.com/apps/app@sha256:amd64": {"mediaType": "manifest"},
+    }
+    monkeypatch.setattr(
+        "doover_cli.apps.apps._read_manifest",
+        lambda ref: (
+            (apps_app.PRESENT, present[ref])
+            if ref in present
+            else (apps_app.MISSING, None)
+        ),
+    )
+
+    state_, verdict = apps_app._release_state("reg.example.com/apps/app@sha256:index")
+
+    assert state_ == apps_app.MISSING
+    assert "linux/arm64" in verdict
+
+
+def test_release_state_reports_an_intact_release(monkeypatch):
+    index = {
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        "manifests": [
+            {
+                "digest": "sha256:arm64",
+                "platform": {"os": "linux", "architecture": "arm64"},
+            },
+            {
+                "digest": "sha256:att",
+                "platform": {"os": "unknown", "architecture": "unknown"},
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        "doover_cli.apps.apps._read_manifest",
+        lambda ref: (
+            (apps_app.PRESENT, index)
+            if ref.endswith("sha256:index")
+            else (apps_app.PRESENT, {"mediaType": "manifest"})
+            if ref.endswith("sha256:arm64")
+            else (apps_app.MISSING, None)
+        ),
+    )
+
+    state_, verdict = apps_app._release_state("reg.example.com/apps/app@sha256:index")
+
+    assert state_ == apps_app.PRESENT
+    assert "1 platform" in verdict
+
+
+def test_is_attestation_recognises_provenance_children():
+    assert apps_app._is_attestation(
+        {"platform": {"os": "unknown", "architecture": "unknown"}}
+    )
+    assert apps_app._is_attestation(
+        {"annotations": {"vnd.docker.reference.type": "attestation-manifest"}}
+    )
+    assert not apps_app._is_attestation(
+        {"platform": {"os": "linux", "architecture": "arm64"}}
+    )
+
+
+def test_verify_pushed_image_rejects_an_unreadable_image(monkeypatch):
+    monkeypatch.setattr(
+        "doover_cli.apps.apps._read_manifest",
+        lambda ref: (apps_app.MISSING, None),
+    )
+
+    with pytest.raises(typer.Exit) as exc_info:
+        apps_app._verify_pushed_image("reg.example.com/apps/app:main", "sha256:index")
+
+    assert exc_info.value.exit_code == 1
+
+
+def test_verify_pushed_image_tolerates_a_missing_attestation(monkeypatch, capsys):
+    """A pull skips `unknown/unknown` children, so their absence is not fatal."""
+    index = {
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        "manifests": [
+            {
+                "digest": "sha256:arm64",
+                "platform": {"os": "linux", "architecture": "arm64"},
+            },
+            {
+                "digest": "sha256:attestation",
+                "platform": {"os": "unknown", "architecture": "unknown"},
+            },
+        ],
+    }
+    present = {
+        "reg.example.com/apps/app@sha256:index": index,
+        "reg.example.com/apps/app@sha256:arm64": {"mediaType": "manifest"},
+    }
+    monkeypatch.setattr(
+        "doover_cli.apps.apps._read_manifest",
+        lambda ref: (
+            (apps_app.PRESENT, present[ref])
+            if ref in present
+            else (apps_app.MISSING, None)
+        ),
+    )
+
+    apps_app._verify_pushed_image("reg.example.com/apps/app:main", "sha256:index")
+
+    assert "attestation" in _strip_ansi(capsys.readouterr().out)
+
+
+def test_verify_pushed_image_does_not_fail_on_an_inconclusive_lookup(
+    monkeypatch, capsys
+):
+    """An expired credential must not be reported as a broken push."""
+    monkeypatch.setattr(
+        "doover_cli.apps.apps._read_manifest",
+        lambda ref: (apps_app.UNKNOWN, None),
+    )
+
+    apps_app._verify_pushed_image("reg.example.com/apps/app:main", "sha256:index")
+
+    assert "not verified" in _strip_ansi(capsys.readouterr().out)
+
+
+def test_verify_pushed_image_ignores_children_it_cannot_check(monkeypatch):
+    """Only an explicit 'not found' is evidence; anything else is inconclusive."""
+    index = {
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        "manifests": [{"digest": "sha256:amd64"}],
+    }
+    monkeypatch.setattr(
+        "doover_cli.apps.apps._read_manifest",
+        lambda ref: (
+            (apps_app.PRESENT, index)
+            if ref.endswith("sha256:index")
+            else (apps_app.UNKNOWN, None)
+        ),
+    )
+
+    apps_app._verify_pushed_image(
+        "reg.example.com/apps/app:main", "sha256:index"
+    )  # no raise
+
+
+def test_read_manifest_classifies_registry_failures(monkeypatch):
+    outcomes = {
+        "missing": (1, "", "ERROR: content at https://reg/v2/x/manifests/y not found"),
+        "unauthorized": (1, "", "ERROR: unexpected status: 401 Unauthorized"),
+        "present": (0, '{"mediaType": "manifest"}', ""),
+    }
+
+    def fake_run(cmd, **kwargs):
+        code, out, err = outcomes[cmd[-1]]
+        return SimpleNamespace(returncode=code, stdout=out, stderr=err)
+
+    monkeypatch.setattr("doover_cli.apps.apps.subprocess.run", fake_run)
+
+    assert _READ_MANIFEST("missing")[0] == apps_app.MISSING
+    assert _READ_MANIFEST("unauthorized")[0] == apps_app.UNKNOWN
+    assert _READ_MANIFEST("present") == (
+        apps_app.PRESENT,
+        {"mediaType": "manifest"},
+    )
+
+
+def test_verify_pushed_image_falls_back_to_the_tag_without_a_digest(monkeypatch):
+    """A push whose digest could not be determined is still worth checking."""
+    seen = []
+    monkeypatch.setattr(
+        "doover_cli.apps.apps._read_manifest",
+        lambda ref: (seen.append(ref), (apps_app.PRESENT, {"mediaType": "manifest"}))[
+            1
+        ],
+    )
+
+    apps_app._verify_pushed_image("reg.example.com/apps/app:main", None)
+
+    assert seen == ["reg.example.com/apps/app:main"]
+
+
+@pytest.mark.parametrize(
+    ("image_name", "expected"),
+    [
+        ("reg.example.com/apps/app:main", "reg.example.com/apps/app"),
+        ("localhost:5000/apps/app:main", "localhost:5000/apps/app"),
+        # A registry port with no tag: the colon must not be read as one.
+        ("localhost:5000/apps/app", "localhost:5000/apps/app"),
+        ("apps/app", "apps/app"),
+    ],
+)
+def test_repository_of_strips_only_the_tag(image_name, expected):
+    assert apps_app._repository_of(image_name) == expected
 
 
 def test_app_release_passes_alpha_flag(monkeypatch, tmp_path):
