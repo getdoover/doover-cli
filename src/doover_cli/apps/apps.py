@@ -299,6 +299,21 @@ def _resolve_application_id(client, app_config, *, staging: bool) -> int | None:
     return None
 
 
+def _image_package_uri(app_config) -> str | None:
+    """The ECR image a processor deploys from, or None if it ships a package.zip.
+
+    A processor whose dependencies cannot fit Lambda's 250MB unzipped zip limit declares
+    `PackageType: "Image"` in `lambda_config` and names an image instead. Such an app has
+    no source archive at all, so the whole build-and-upload-a-zip path has to be skipped:
+    there is no ./build.sh to run, and the control plane rejects a processor_source
+    upload for it.
+    """
+    lambda_config = getattr(app_config, "lambda_config", None) or {}
+    if lambda_config.get("PackageType") != "Image":
+        return None
+    return (lambda_config.get("Code") or {}).get("ImageUri")
+
+
 def _publish_processor_package(
     client,
     app_id: int,
@@ -1172,20 +1187,32 @@ def publish(
             rich.print("[green]Widget uploaded.[/green]")
 
     if app_config.type in PACKAGE_APP_TYPES:
-        if build_package:
-            print("\nBuilding package.zip for upload...")
-            shell_run("./build.sh", cwd=root_fp)
-        else:
+        image_uri = _image_package_uri(app_config)
+        if image_uri:
+            # Nothing to build or upload: the deployable is already in ECR, and the
+            # release below is what points the function at it.
             print(
-                "\nSkipping package.zip build (--no-build-package); using existing package.zip."
+                f"\nProcessor deploys from a container image; skipping package.zip.\n"
+                f"  image: {image_uri}\n"
+                f"Push the image before releasing, or the release will deploy whatever "
+                f"that tag currently points at."
             )
-        print("Uploading package.zip to Doover...")
-        processor_response = _publish_processor_package(
-            client,
-            application_id,
-            root_fp,
-        )
-        print("Done!")
+            processor_response = None
+        else:
+            if build_package:
+                print("\nBuilding package.zip for upload...")
+                shell_run("sh ./build.sh", cwd=root_fp)
+            else:
+                print(
+                    "\nSkipping package.zip build (--no-build-package); using existing package.zip."
+                )
+            print("Uploading package.zip to Doover...")
+            processor_response = _publish_processor_package(
+                client,
+                application_id,
+                root_fp,
+            )
+            print("Done!")
         renderer.render(processor_response or response)
         if release:
             ctx.invoke(

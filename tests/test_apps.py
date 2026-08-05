@@ -706,7 +706,7 @@ def test_app_publish_processor_type_without_ui_skips_ui_export(monkeypatch, tmp_
 
     assert result.exit_code == 0
     assert "export_ui_called" not in captured
-    assert captured["build_script"] == ("./build.sh", tmp_path)
+    assert captured["build_script"] == ("sh ./build.sh", tmp_path)
     assert captured["processor_source"] == ("303", {"file": package_fp})
     # publish uploads the package but no longer cuts a version (that's `release`)
     assert "processor_version" not in captured
@@ -981,7 +981,7 @@ def test_app_publish_processor_builds_package_without_release(monkeypatch, tmp_p
     result = runner.invoke(app, ["app", "publish", str(tmp_path), "--no-release"])
 
     assert result.exit_code == 0
-    assert captured["build_script"] == ("./build.sh", tmp_path)
+    assert captured["build_script"] == ("sh ./build.sh", tmp_path)
     assert captured["application_id"] == "303"
     assert captured["body"] == {"file": package_fp}
     # publish uploads the package; the version is cut by `doover app release`
