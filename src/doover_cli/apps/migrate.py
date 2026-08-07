@@ -328,6 +328,50 @@ def _compose_paths(app_dir: Path, entry: dict[str, Any]) -> list[Path]:
     )
 
 
+# `npm run build`, with or without a --prefix. Deliberately narrow: only a plain
+# build command is rewritten, because anything else is a command someone wrote on
+# purpose and may already install by another route.
+_NPM_BUILD = re.compile(
+    r"^npm(?P<prefix>\s+--prefix\s+(?P<dir>\S+))?\s+run\s+build\s*$"
+)
+
+
+def widget_build_command(command: str | None, app_dir: Path) -> str | None:
+    """`command` with a dependency install in front of it, or None to leave it.
+
+    A widget build runs on a fresh runner where `node_modules` does not exist, so
+    `npm run build` fails on the build tool itself being absent -- rsbuild, in the
+    case that surfaced this. The install belongs in the command rather than being
+    hardcoded around it: an app that installs some other way keeps working, and
+    the command in doover_config.json stays the whole truth about how the widget
+    is built.
+
+    `npm ci` when a lockfile is committed, since that is the reproducible verb and
+    the one CI wants; `npm install` when there is none, which `ci` refuses.
+    """
+    if not command:
+        return None
+
+    match = _NPM_BUILD.match(command.strip())
+    if match is None:
+        # Already installs, or does something this doesn't understand.
+        return None
+
+    prefix = match["prefix"] or ""
+    widget_dir = app_dir / match["dir"] if match["dir"] else app_dir
+    verb = "ci" if (widget_dir / "package-lock.json").exists() else "install"
+    return f"npm{prefix} {verb} && {command.strip()}"
+
+
+def _apply_widget_install(data: dict[str, Any], app_dir: Path) -> None:
+    for entry in data.values():
+        if not (isinstance(entry, dict) and "type" in entry):
+            continue
+        updated = widget_build_command(entry.get("build_widget_command"), app_dir)
+        if updated is not None:
+            entry["build_widget_command"] = updated
+
+
 def _is_legacy_workflow(path: Path) -> bool:
     if path.name not in LEGACY_WORKFLOWS:
         return False
@@ -716,6 +760,9 @@ def migrate(
             raise typer.Exit(1)
 
         migrated_data = migrate_config(data)
+        # Needs the filesystem (is there a lockfile?), so it can't live in the
+        # pure entry rewrite.
+        _apply_widget_install(migrated_data, config_path.parent)
         all_apps.extend(
             (config_path.parent, entry)
             for entry in migrated_data.values()
