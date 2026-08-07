@@ -92,6 +92,11 @@ class FakeAppConfig:
             "banner_url": "https://example.com/banner.png",
         }
 
+    def stale_deployment_images(self):
+        # No deployment folder in these fixtures, so nothing to disagree with
+        # image_name.
+        return []
+
     def to_request_payload(self, *, include_deployment_data, is_staging, method="POST"):
         payload = dict(self._payload)
         if include_deployment_data:

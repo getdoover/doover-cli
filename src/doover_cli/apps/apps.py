@@ -1275,6 +1275,17 @@ def publish(
     if publish_org_id is not None:
         client.organisation_id = int(publish_org_id)
 
+    # The deployment folder is published verbatim and is what a device pulls, so
+    # an image pinned there wins over image_name in practice. Warn rather than
+    # abort: a deliberate pin (an older tag, a fork) is legitimate, and this
+    # can't tell one from a reference left behind by a registry change.
+    for path, reference in app_config.stale_deployment_images():
+        rich.print(
+            f"[yellow]{path.name} deploys '{reference}', but this app is "
+            f"registered as '{app_config.image_name}'. The deployment folder is "
+            f"what the device pulls, so it will run the former.[/yellow]"
+        )
+
     rich.print(
         f"Updating application on doover site ({_control_base_url() or 'unknown base URL'})...\n"
     )

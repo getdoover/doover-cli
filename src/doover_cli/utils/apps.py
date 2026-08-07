@@ -226,6 +226,52 @@ class LocalApplication(ControlApplication):
             keys.add(config.get("output_id", field_name))
         return keys
 
+    def stale_deployment_images(self) -> list[tuple[Path, str]]:
+        """Deployment files naming a different image for this app than
+        `image_name`, as `(path, reference)`.
+
+        The deployment folder is published as-is and is what a device pulls, so
+        an image pinned there outranks `image_name` in practice. The two drift
+        silently: changing the registry in doover_config.json leaves a compose
+        file deploying the old image, and nothing about the publish looks wrong.
+
+        Only references naming *this* app are reported -- a compose file that
+        brings up a sidecar or a third-party service is not a mismatch.
+        """
+        if not self.image_name:
+            return []
+
+        deployment_fp = (self.base_path or Path()) / self.deployment_folder
+        if not deployment_fp.is_dir():
+            return []
+
+        # Imported here: migrate.py imports this module, so a module-level
+        # import would be circular.
+        from ..apps.migrate import image_key
+
+        expected_key = image_key(self.image_name)
+        stale = []
+        for path in sorted(deployment_fp.rglob("*")):
+            if not path.is_file() or path.suffix not in (".yml", ".yaml"):
+                continue
+            try:
+                content = path.read_text()
+            except (OSError, UnicodeDecodeError):
+                continue
+            for line in content.splitlines():
+                stripped = line.strip()
+                if not stripped.startswith("image:"):
+                    continue
+                reference = stripped[len("image:") :].strip().strip("\"'")
+                if not reference:
+                    continue
+                if (
+                    image_key(reference) == expected_key
+                    and reference != self.image_name
+                ):
+                    stale.append((path, reference))
+        return stale
+
     def _deployment_data(self) -> str | None:
         deployment_fp = (self.base_path or Path()) / self.deployment_folder
         if not deployment_fp.exists():

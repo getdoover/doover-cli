@@ -267,6 +267,67 @@ def migrate_config(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# `image:` in a compose file, captured so the reference can be swapped without
+# reformatting the line around it. Compose files are edited as text rather than
+# round-tripped through a YAML dump, which would lose comments and ordering.
+_COMPOSE_IMAGE = re.compile(
+    r"^(?P<prefix>\s*image:\s*)(?P<quote>['\"]?)(?P<ref>[^'\"\s#]+)(?P<suffix>.*)$"
+)
+
+
+def image_key(reference: str) -> str:
+    """The app an image reference names, ignoring registry, namespace and tag.
+
+    `spaneng/host-configurator:main` and
+    `registry.doover.com/apps/host_configurator:main` are the same app under two
+    registries, so both reduce to `host_configurator`. Hyphens fold to
+    underscores because image names use one and app names the other.
+    """
+    repository, _ = _split_image(reference)
+    return (repository or "").rsplit("/", 1)[-1].replace("-", "_").lower()
+
+
+def migrate_compose(content: str, images: dict[str, str]) -> str:
+    """A compose file with each app's image pointed at its registered reference.
+
+    `images` maps `image_key` to the `image_name` doover_config.json now
+    declares. An image that matches no app in this repo -- a sidecar, a
+    third-party service -- is left exactly as it is.
+    """
+    lines = content.splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        match = _COMPOSE_IMAGE.match(line.rstrip("\n"))
+        if match is None:
+            continue
+        replacement = images.get(image_key(match["ref"]))
+        if replacement is None or replacement == match["ref"]:
+            continue
+        newline = "\n" if line.endswith("\n") else ""
+        lines[index] = (
+            f"{match['prefix']}{match['quote']}{replacement}"
+            f"{match['quote']}{match['suffix']}{newline}"
+        )
+    return "".join(lines)
+
+
+def _compose_paths(app_dir: Path, entry: dict[str, Any]) -> list[Path]:
+    """The deployment files an app ships, which are what actually run on a device.
+
+    `deployment_data` is built from this folder and published alongside the app,
+    so an image pinned here is the one the device pulls -- regardless of what
+    `image_name` says. That is how a repo ends up migrated but still deploying a
+    stale image.
+    """
+    folder = app_dir / (entry.get("deployment_folder") or "deployment")
+    if not folder.is_dir():
+        return []
+    return sorted(
+        path
+        for path in folder.rglob("*")
+        if path.is_file() and path.suffix in (".yml", ".yaml")
+    )
+
+
 def _is_legacy_workflow(path: Path) -> bool:
     if path.name not in LEGACY_WORKFLOWS:
         return False
@@ -617,10 +678,12 @@ def migrate(
 ):
     """Migrate an app repository to the current config and CI format.
 
-    Points images at the Doover container registry, drops keys that no longer do
-    anything -- including the committed config/UI schemas, which are generated
-    from the app's source at publish time -- and replaces the per-repo build,
-    lint and test workflows with the shared reusable one.
+    Points images at the Doover container registry -- in doover_config.json and
+    in the deployment/ compose files, which are what a device actually pulls --
+    drops keys that no longer do anything, including the committed config/UI
+    schemas that are generated from the app's source at publish time, and
+    replaces the per-repo build, lint and test workflows with the shared
+    reusable one.
 
     Then does the half the repo cannot state for itself: points each app at the
     Doover-internal container registry, which the config file no longer names,
@@ -663,14 +726,38 @@ def migrate(
         rel = config_path.relative_to(root)
         if migrated == original:
             rich.print(f"[dim]{rel} already up to date.[/dim]")
-            continue
-
-        changed = True
-        if dry_run:
-            rich.print(f"[yellow]Would rewrite {rel}[/yellow]")
         else:
-            config_path.write_text(migrated)
-            rich.print(f"[green]Rewrote {rel}[/green]")
+            changed = True
+            if dry_run:
+                rich.print(f"[yellow]Would rewrite {rel}[/yellow]")
+            else:
+                config_path.write_text(migrated)
+                rich.print(f"[green]Rewrote {rel}[/green]")
+
+        # The deployment folder ships its own copy of the image reference, and
+        # that copy is the one a device pulls. Rewriting only the config leaves
+        # the app registered against the new registry but still deploying the
+        # old image.
+        images = {
+            image_key(entry["image_name"]): entry["image_name"]
+            for entry in migrated_data.values()
+            if isinstance(entry, dict) and entry.get("image_name")
+        }
+        for entry in migrated_data.values():
+            if not (isinstance(entry, dict) and "type" in entry):
+                continue
+            for compose_path in _compose_paths(config_path.parent, entry):
+                before = compose_path.read_text()
+                after = migrate_compose(before, images)
+                if after == before:
+                    continue
+                changed = True
+                compose_rel = compose_path.relative_to(root)
+                if dry_run:
+                    rich.print(f"[yellow]Would rewrite {compose_rel}[/yellow]")
+                else:
+                    compose_path.write_text(after)
+                    rich.print(f"[green]Rewrote {compose_rel}[/green]")
 
     if workflows:
         delete, write_path, content = _plan_workflows(root, workflow_ref)
