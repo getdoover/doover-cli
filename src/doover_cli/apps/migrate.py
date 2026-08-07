@@ -336,7 +336,7 @@ _NPM_BUILD = re.compile(
 )
 
 
-def widget_build_command(command: str | None, app_dir: Path) -> str | None:
+def widget_build_command(command: str | None) -> str | None:
     """`command` with a dependency install in front of it, or None to leave it.
 
     A widget build runs on a fresh runner where `node_modules` does not exist, so
@@ -346,8 +346,10 @@ def widget_build_command(command: str | None, app_dir: Path) -> str | None:
     the command in doover_config.json stays the whole truth about how the widget
     is built.
 
-    `npm ci` when a lockfile is committed, since that is the reproducible verb and
-    the one CI wants; `npm install` when there is none, which `ci` refuses.
+    `npm install` rather than `npm ci`: the same command runs on a developer's
+    machine via `doover app build-widget`, where `ci` deleting and refetching
+    node_modules on every build is a poor trade for reproducibility, and it fails
+    outright in a repo with no committed lockfile.
     """
     if not command:
         return None
@@ -358,16 +360,14 @@ def widget_build_command(command: str | None, app_dir: Path) -> str | None:
         return None
 
     prefix = match["prefix"] or ""
-    widget_dir = app_dir / match["dir"] if match["dir"] else app_dir
-    verb = "ci" if (widget_dir / "package-lock.json").exists() else "install"
-    return f"npm{prefix} {verb} && {command.strip()}"
+    return f"npm{prefix} install && {command.strip()}"
 
 
-def _apply_widget_install(data: dict[str, Any], app_dir: Path) -> None:
+def _apply_widget_install(data: dict[str, Any]) -> None:
     for entry in data.values():
         if not (isinstance(entry, dict) and "type" in entry):
             continue
-        updated = widget_build_command(entry.get("build_widget_command"), app_dir)
+        updated = widget_build_command(entry.get("build_widget_command"))
         if updated is not None:
             entry["build_widget_command"] = updated
 
@@ -760,9 +760,7 @@ def migrate(
             raise typer.Exit(1)
 
         migrated_data = migrate_config(data)
-        # Needs the filesystem (is there a lockfile?), so it can't live in the
-        # pure entry rewrite.
-        _apply_widget_install(migrated_data, config_path.parent)
+        _apply_widget_install(migrated_data)
         all_apps.extend(
             (config_path.parent, entry)
             for entry in migrated_data.values()
