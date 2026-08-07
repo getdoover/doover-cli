@@ -49,6 +49,7 @@ from ..utils.shell_commands import run as shell_run
 from ..utils.sentry import capture_handled_exception
 from ..utils.state import state
 from .app_install import application_app as installs_app
+from .migrate import migrate as migrate_command
 
 if TYPE_CHECKING:
     from pydoover.api import ControlClient
@@ -67,6 +68,7 @@ app.add_typer(
     name="installs",
     help="Manage installations for an application.",
 )
+app.command(name="migrate")(migrate_command)
 
 
 class AppType(Enum):

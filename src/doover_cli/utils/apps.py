@@ -618,6 +618,11 @@ def discover_apps(root: Path | None = None) -> list[dict[str, Any]]:
         language   "py" | "rs" | None when there is no source to build
         builds_image  whether CI should build and push an image for it -- false for
                    apps that deploy an off-the-shelf image, which are still DEV
+        builds_package  whether CI should upload a package.zip for it: the other
+                   deployable, used by processors, reports and integrations. An
+                   app has one or the other, never both, and CI needs to publish
+                   both kinds -- a processor released by hand from a laptop is a
+                   release nobody can reproduce.
         widget     whether the app builds a UI widget
         image_name registered image, or None for apps without one
         platforms  comma-separated build platforms parsed out of `build_args`, or
@@ -677,6 +682,7 @@ def discover_apps(root: Path | None = None) -> list[dict[str, Any]]:
                     "type": entry.get("type"),
                     "language": language,
                     "builds_image": builds_image,
+                    "builds_package": entry.get("type") in PACKAGE_APP_TYPES,
                     "widget": bool(entry.get("build_widget_command")),
                     "image_name": entry.get("image_name"),
                     "platforms": _parse_platforms(entry.get("build_args")),
