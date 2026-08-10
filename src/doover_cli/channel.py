@@ -184,6 +184,12 @@ def publish(
 def publish_file(
     channel_name: Annotated[str, Argument(help="Channel name to publish to")],
     file_path: Annotated[Path, Argument(help="Path to the file to publish")],
+    clear_attachments: Annotated[
+        bool,
+        typer.Option(
+            help="Whether to remove any existing attachments on the aggregate."
+        ),
+    ] = True,
     _profile: ProfileAnnotation = None,
     _agent: AgentAnnotation = None,
 ):
@@ -205,6 +211,7 @@ def publish_file(
             replace_data=True,
             files=[attachment],
             log_update=True,
+            clear_attachments=clear_attachments,
         )
     except NotFoundError as exc:
         print("Channel name was incorrect. Is it owned by this agent?")
