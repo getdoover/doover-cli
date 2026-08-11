@@ -1,7 +1,7 @@
 """Bring an app repository onto the current doover_config.json / CI format.
 
-Three things changed at once and every app repo has to make all three moves, so
-they live in one command rather than three:
+Several things changed at once and every app repo has to make all the moves, so
+they live in one command rather than several:
 
   * images come from the Doover registry, whose reference is derived from the app
     name rather than hand-written per repo;
@@ -9,7 +9,9 @@ they live in one command rather than three:
     the copies committed into doover_config.json are stale duplicates of the real
     source of truth;
   * the per-repo build/lint/test workflows are replaced by the shared reusable
-    workflow in getdoover/workflows.
+    workflow in getdoover/workflows;
+  * a widget's ConcatenatePlugin.ts is vendored per repo rather than installed,
+    so a fix to it only reaches the fleet by being copied in.
 
 The rewrite is deliberately conservative: it drops keys that provably do nothing
 and rewrites the ones that must change, and leaves everything else -- including
@@ -34,6 +36,7 @@ from ..utils.apps import (
     _config_paths,
 )
 from ..utils.state import state
+from .widget_plugin import PLUGIN_SOURCE, plan_widget_plugins
 
 # Every image on a Doover registry lives under this namespace, so the reference
 # is `<registry>/apps/<app name>:<tag>` and nothing about it needs to be
@@ -270,8 +273,13 @@ def migrate_config(data: dict[str, Any]) -> dict[str, Any]:
 # `image:` in a compose file, captured so the reference can be swapped without
 # reformatting the line around it. Compose files are edited as text rather than
 # round-tripped through a YAML dump, which would lose comments and ordering.
+#
+# The closing quote is matched by backreference rather than swept into `suffix`,
+# which is what the line is rebuilt from: leaving it there and re-adding the
+# opening quote emitted a doubled quote and broke every quoted image line.
 _COMPOSE_IMAGE = re.compile(
-    r"^(?P<prefix>\s*image:\s*)(?P<quote>['\"]?)(?P<ref>[^'\"\s#]+)(?P<suffix>.*)$"
+    r"^(?P<prefix>\s*image:\s*)(?P<quote>['\"]?)(?P<ref>[^'\"\s#]+)"
+    r"(?P=quote)(?P<suffix>.*)$"
 )
 
 
@@ -287,20 +295,75 @@ def image_key(reference: str) -> str:
     return (repository or "").rsplit("/", 1)[-1].replace("-", "_").lower()
 
 
-def migrate_compose(content: str, images: dict[str, str]) -> str:
+def _explicit_tag(reference: str) -> str | None:
+    """The tag a reference actually spells out, or None if it leans on a default.
+
+    Distinguished from `_split_image`, which substitutes a default, because a
+    tag someone wrote by hand is a deliberate choice about *which artifact* --
+    and the two cases want opposite answers when the compose file and the config
+    disagree.
+    """
+    repository, separator, tag = reference.rpartition(":")
+    if not separator or not repository or "/" in tag:
+        return None
+    return tag or None
+
+
+# What a rendered deployment substitutes for the app's own image. A template
+# that says this needs no migration ever again: each app in a multi-app repo
+# renders its own `image_name`, which one hard-coded reference cannot do.
+IMAGE_PLACEHOLDER = "{{ IMAGE_NAME }}"
+
+
+def _is_jinja(path: Path, content: str) -> bool:
+    """Whether this deployment file is rendered before a device sees it.
+
+    Two signals, either sufficient: a suffix past the `.yml` (`.yml.template`,
+    `.yaml.j2`), and delimiters already in the body. Only a rendered file can
+    carry `{{ IMAGE_NAME }}`; writing it into a plain compose file would pin the
+    device to an image called `{{`.
+    """
+    suffixes = [suffix.lower() for suffix in path.suffixes]
+    if suffixes and suffixes[-1] not in (".yml", ".yaml"):
+        return True
+    return "{{" in content or "{%" in content
+
+
+def migrate_compose(content: str, images: dict[str, str], jinja: bool = False) -> str:
     """A compose file with each app's image pointed at its registered reference.
 
     `images` maps `image_key` to the `image_name` doover_config.json now
     declares. An image that matches no app in this repo -- a sidecar, a
     third-party service -- is left exactly as it is.
+
+    A `jinja` file gets `{{ IMAGE_NAME }}` rather than the reference itself.
+    That is the difference between a repo that migrates once and a repo that
+    needs migrating again at every registry move -- and it is the only correct
+    answer where several apps share one compose file, since the literal can only
+    ever name one of them. Anything else gets the literal reference.
+
+    Only the repository moves: a tag the compose file spells out is kept. Apps
+    ship sidecars built from their own repository under a different tag --
+    device-compliance runs `device-compliance:dnsmasq` beside
+    `device-compliance:main` -- and those differ from the app only by tag, so
+    taking the registered reference wholesale replaced the sidecar with a second
+    copy of the app.
     """
     lines = content.splitlines(keepends=True)
     for index, line in enumerate(lines):
         match = _COMPOSE_IMAGE.match(line.rstrip("\n"))
         if match is None:
             continue
-        replacement = images.get(image_key(match["ref"]))
-        if replacement is None or replacement == match["ref"]:
+        registered = images.get(image_key(match["ref"]))
+        if registered is None:
+            continue
+        if jinja:
+            replacement = IMAGE_PLACEHOLDER
+        else:
+            repository, registered_tag = _split_image(registered)
+            tag = _explicit_tag(match["ref"]) or registered_tag
+            replacement = f"{repository}:{tag}"
+        if replacement == match["ref"]:
             continue
         newline = "\n" if line.endswith("\n") else ""
         lines[index] = (
@@ -317,6 +380,11 @@ def _compose_paths(app_dir: Path, entry: dict[str, Any]) -> list[Path]:
     so an image pinned here is the one the device pulls -- regardless of what
     `image_name` says. That is how a repo ends up migrated but still deploying a
     stale image.
+
+    Matched on any `.yml`/`.yaml` in the name rather than the final suffix,
+    because the files that most need rewriting are the rendered ones --
+    `docker-compose.yml.template` is the fleet's second most common deployment
+    file, and matching on `path.suffix` skipped every one of them.
     """
     folder = app_dir / (entry.get("deployment_folder") or "deployment")
     if not folder.is_dir():
@@ -324,7 +392,8 @@ def _compose_paths(app_dir: Path, entry: dict[str, Any]) -> list[Path]:
     return sorted(
         path
         for path in folder.rglob("*")
-        if path.is_file() and path.suffix in (".yml", ".yaml")
+        if path.is_file()
+        and any(suffix.lower() in (".yml", ".yaml") for suffix in path.suffixes)
     )
 
 
@@ -700,6 +769,13 @@ def migrate(
         str,
         typer.Option(help="Reusable workflow to call, as owner/repo/path@ref."),
     ] = DEFAULT_WORKFLOW_REF,
+    widget_plugin: Annotated[
+        bool,
+        typer.Option(
+            help="Update each widget's vendored ConcatenatePlugin.ts to the "
+            "current one. Disable with --no-widget-plugin.",
+        ),
+    ] = True,
     registry_profile: Annotated[
         bool,
         typer.Option(
@@ -727,7 +803,8 @@ def migrate(
     drops keys that no longer do anything, including the committed config/UI
     schemas that are generated from the app's source at publish time, and
     replaces the per-repo build, lint and test workflows with the shared
-    reusable one.
+    reusable one. Widgets also get the current ConcatenatePlugin.ts, which each
+    repo vendors a copy of, so a fix to it reaches the repo at all.
 
     Then does the half the repo cannot state for itself: points each app at the
     Doover-internal container registry, which the config file no longer names,
@@ -788,14 +865,23 @@ def migrate(
             for entry in migrated_data.values()
             if isinstance(entry, dict) and entry.get("image_name")
         }
-        for entry in migrated_data.values():
-            if not (isinstance(entry, dict) and "type" in entry):
-                continue
-            for compose_path in _compose_paths(config_path.parent, entry):
-                before = compose_path.read_text()
-                after = migrate_compose(before, images)
-                if after == before:
-                    continue
+        # Deduped across entries: several apps routinely share one deployment
+        # folder -- that is the case this whole pass exists for -- and visiting
+        # the file once per app reported the same rewrite five times.
+        compose_paths = sorted(
+            {
+                path
+                for entry in migrated_data.values()
+                if isinstance(entry, dict) and "type" in entry
+                for path in _compose_paths(config_path.parent, entry)
+            }
+        )
+        for compose_path in compose_paths:
+            before = compose_path.read_text()
+            after = migrate_compose(
+                before, images, jinja=_is_jinja(compose_path, before)
+            )
+            if after != before:
                 changed = True
                 compose_rel = compose_path.relative_to(root)
                 if dry_run:
@@ -824,6 +910,18 @@ def migrate(
                 write_path.parent.mkdir(parents=True, exist_ok=True)
                 write_path.write_text(content)
                 rich.print(f"[green]Wrote {rel}[/green]")
+
+    if widget_plugin:
+        # Only files that are recognisably this plugin and not already current;
+        # a repo's unrelated ConcatenatePlugin.ts keeps whatever it says.
+        for path in plan_widget_plugins(root):
+            changed = True
+            rel = path.relative_to(root)
+            if dry_run:
+                rich.print(f"[yellow]Would update {rel}[/yellow]")
+            else:
+                path.write_text(PLUGIN_SOURCE)
+                rich.print(f"[green]Updated {rel}[/green]")
 
     if (registry_profile or trusted_publisher) and all_apps:
         if dry_run:
