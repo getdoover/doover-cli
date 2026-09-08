@@ -602,7 +602,7 @@ _DISCOVERY_SKIP_DIRS = frozenset(
 )
 
 
-def _detect_language(app_dir: Path) -> str | None:
+def detect_language(app_dir: Path) -> str | None:
     """Which toolchain builds the app in `app_dir`.
 
     Decided by the manifest sitting beside its doover_config.json, so a monorepo
@@ -613,6 +613,45 @@ def _detect_language(app_dir: Path) -> str | None:
     if (app_dir / "pyproject.toml").exists():
         return "py"
     return None
+
+
+# What a Rust app runs to regenerate its schemas. The framework gives every
+# application binary an `export [path] [--app-name NAME]` subcommand that writes
+# the config schema and, when the app has one, the UI schema -- one command for
+# both, with the same read-merge-write over doover_config.json that pydoover's
+# exporters do. Driven through cargo so it works from a plain checkout with
+# nothing built yet, which is the state CI is always in.
+RUST_EXPORT_COMMAND = "cargo run --quiet -- export doover_config.json"
+
+
+def run_schema_export(
+    app_dir: Path,
+    command: str | None,
+    python_default: str,
+    app_name: str | None = None,
+    cwd: Path | None = None,
+) -> None:
+    """Regenerate an app's schemas by running its own exporter.
+
+    Python apps run a console script under uv, as they always have. Rust apps
+    run their binary's built-in `export` subcommand, so the schema in
+    doover_config.json comes from the source in both languages rather than from
+    whatever was committed.
+
+    `command` is the app's own `export_*_command`, honoured verbatim when set --
+    an app whose binary is not what `cargo run` picks by default (a workspace
+    with several) says so there rather than being unbuildable by CI.
+    """
+    if detect_language(app_dir) == "rs":
+        cmd = command or RUST_EXPORT_COMMAND
+        # The binary otherwise falls back to APP_KEY or its own file name, which
+        # is not the application name in a repo whose binary is spelled with
+        # hyphens and whose app is spelled with underscores.
+        if app_name and "--app-name" not in cmd:
+            cmd = f"{cmd} --app-name {app_name}"
+        run(cmd, cwd=app_dir)
+    else:
+        call_with_uv(command or python_default, in_shell=True, cwd=cwd)
 
 
 def _config_paths(root: Path) -> list[Path]:
@@ -670,6 +709,9 @@ def discover_apps(root: Path | None = None) -> list[dict[str, Any]]:
                    both kinds -- a processor released by hand from a laptop is a
                    release nobody can reproduce.
         widget     whether the app builds a UI widget
+        exports_config  whether the app regenerates a config schema from its
+                   source. False when it declares `export_config_command:
+                   NO_EXPORT`, i.e. it holds no config of its own
         image_name registered image, or None for apps without one
         platforms  comma-separated build platforms parsed out of `build_args`, or
                    None to let the builder decide. CI passes this straight to
@@ -692,7 +734,7 @@ def discover_apps(root: Path | None = None) -> list[dict[str, Any]]:
             print(f"warning: could not read {config_path}: {e}", file=sys.stderr)
             continue
 
-        language = _detect_language(app_dir)
+        language = detect_language(app_dir)
         has_dockerfile = (app_dir / "Dockerfile").exists()
         rel = app_dir.relative_to(root)
         for key, entry in data.items():
@@ -730,6 +772,12 @@ def discover_apps(root: Path | None = None) -> list[dict[str, Any]]:
                     "builds_image": builds_image,
                     "builds_package": entry.get("type") in PACKAGE_APP_TYPES,
                     "widget": bool(entry.get("build_widget_command")),
+                    # Whether the app has a config schema to regenerate. False
+                    # for an app whose settings live on other apps' installs --
+                    # the device runtime holds no config of its own -- and the
+                    # signal CI needs to know that running the image's exporter
+                    # is not a meaningful smoke test of it.
+                    "exports_config": entry.get("export_config_command") != "NO_EXPORT",
                     "image_name": entry.get("image_name"),
                     "platforms": _parse_platforms(entry.get("build_args")),
                 }

@@ -13,6 +13,7 @@ from .utils.apps import (
     call_with_uv,
     get_app_config,
     preserve_file,
+    run_schema_export,
 )
 
 app = typer.Typer(no_args_is_help=True)
@@ -51,9 +52,18 @@ def export(
     if config_fp is None:
         root_fp = get_app_directory(app_fp)
         app_config = get_app_config(root_fp, app_name=app_name)
-        call_with_uv(
-            app_config.export_config_command or "export-config",
-            in_shell=True,
+        # An app with no config of its own -- one whose settings live on other
+        # apps' installs -- says so here, the same way `export_ui_command` has
+        # always been able to. Without this the only way to publish such an app
+        # is to give it an exporter that writes nothing.
+        if app_config.export_config_command == "NO_EXPORT":
+            print("App requested no config export. Skipping...")
+            return
+        run_schema_export(
+            root_fp,
+            app_config.export_config_command,
+            "export-config",
+            app_name=app_config.name,
             cwd=app_fp,
         )
     else:

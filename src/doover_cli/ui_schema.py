@@ -9,9 +9,9 @@ import typer
 from .utils.apps import (
     app_names_in_config,
     get_app_directory,
-    call_with_uv,
     get_app_config,
     preserve_file,
+    run_schema_export,
 )
 
 app = typer.Typer(no_args_is_help=True)
@@ -46,9 +46,15 @@ def export(
         print("App requested no ui export. Skipping...")
         return
 
-    call_with_uv(
-        export_command,
-        in_shell=True,
+    # A Rust app's `export` writes both schemas in one run, so this is the same
+    # command the config export uses. Running it again rather than skipping is
+    # what keeps `ui-schema validate --export` an actual check of the source
+    # instead of a check of whatever was committed.
+    run_schema_export(
+        root_fp,
+        app_config.export_ui_command,
+        "export-ui",
+        app_name=app_config.name,
         cwd=app_fp,
     )
 
@@ -109,9 +115,12 @@ def _validate_ui_file(config_file: Path):
         if not isinstance(v, dict):
             continue
 
-        try:
-            schema = v["ui_schema"]
-        except KeyError:
+        schema = v.get("ui_schema")
+        # An explicit null says the same thing as no key at all: this app has no
+        # UI. Several do -- the three core device apps among them -- and an
+        # exporter that writes null is how they say so, so treating it as a
+        # malformed schema failed the check on every one of them.
+        if schema is None:
             continue
 
         if not isinstance(schema, (dict, list)):

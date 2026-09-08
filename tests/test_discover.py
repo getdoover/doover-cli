@@ -155,3 +155,24 @@ class TestDiscoverApps:
 
     def test_empty_repository_returns_nothing(self, tmp_path):
         assert discover_apps(tmp_path) == []
+
+    def test_exports_config_is_false_for_no_export(self, tmp_path):
+        """An app whose settings live on other apps' installs -- the device
+        runtime -- has no schema to regenerate, and CI needs to know."""
+        _write(
+            tmp_path / "doover_config.json",
+            {"foo": _device(name="foo", export_config_command="NO_EXPORT")},
+        )
+        (tmp_path / "Cargo.toml").touch()
+        (tmp_path / "Dockerfile").touch()
+
+        app = discover_apps(tmp_path)[0]
+        assert app["language"] == "rs"
+        assert app["builds_image"] is True
+        assert app["exports_config"] is False
+
+    def test_exports_config_defaults_true(self, tmp_path):
+        _write(tmp_path / "doover_config.json", {"foo": _device(name="foo")})
+        (tmp_path / "pyproject.toml").touch()
+
+        assert discover_apps(tmp_path)[0]["exports_config"] is True
