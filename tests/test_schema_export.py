@@ -60,7 +60,13 @@ class TestRunSchemaExport:
     def test_rust_app_runs_its_export_subcommand(self, tmp_path, calls):
         (tmp_path / "Cargo.toml").touch()
 
-        apps_utils.run_schema_export(tmp_path, None, "export-config", app_name="foo")
+        apps_utils.run_schema_export(
+            tmp_path,
+            None,
+            "export-config",
+            app_name="foo",
+            rust_default=apps_utils.RUST_EXPORT_COMMAND,
+        )
 
         assert calls["uv"] == []
         cmd, cwd = calls["run"][0]
@@ -71,9 +77,43 @@ class TestRunSchemaExport:
     def test_rust_app_without_an_app_name_leaves_the_flag_off(self, tmp_path, calls):
         (tmp_path / "Cargo.toml").touch()
 
-        apps_utils.run_schema_export(tmp_path, None, "export-config")
+        apps_utils.run_schema_export(
+            tmp_path, None, "export-config", rust_default=apps_utils.RUST_EXPORT_COMMAND
+        )
 
         assert "--app-name" not in calls["run"][0][0]
+
+    def test_a_rust_app_runs_nothing_for_a_second_schema_kind(self, tmp_path, calls):
+        """The UI and notification exporters, which pass no rust_default.
+
+        A doover-rs binary has one `export` that writes every schema it has, so
+        the config exporter already ran it. Inventing the same command again is
+        what hung doover-device-runtime for 75 minutes: its binary is a
+        supervisor that accepts any argv, so `export` started it supervising.
+        """
+        (tmp_path / "Cargo.toml").touch()
+
+        apps_utils.run_schema_export(tmp_path, None, "export-ui", app_name="foo")
+
+        assert calls["run"] == []
+        assert calls["uv"] == []
+
+    def test_a_rust_app_still_honours_an_explicit_command(self, tmp_path, calls):
+        """An app that really does have a second exporter says so."""
+        (tmp_path / "Cargo.toml").touch()
+
+        apps_utils.run_schema_export(
+            tmp_path, "cargo run --bin exporter -- ui", "export-ui", app_name="foo"
+        )
+
+        assert calls["run"][0][0].startswith("cargo run --bin exporter -- ui")
+
+    def test_a_python_app_is_unaffected_by_the_rust_default(self, tmp_path, calls):
+        (tmp_path / "pyproject.toml").touch()
+
+        apps_utils.run_schema_export(tmp_path, None, "export-ui", app_name="foo")
+
+        assert calls["uv"][0][0] == ("export-ui",)
 
     def test_a_configured_rust_command_wins(self, tmp_path, calls):
         """A workspace with several binaries names the one to run itself."""

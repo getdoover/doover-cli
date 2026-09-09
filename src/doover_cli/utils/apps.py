@@ -624,11 +624,14 @@ def detect_language(app_dir: Path) -> str | None:
 
 
 # What a Rust app runs to regenerate its schemas. The framework gives every
-# application binary an `export [path] [--app-name NAME]` subcommand that writes
-# the config schema and, when the app has one, the UI schema -- one command for
-# both, with the same read-merge-write over doover_config.json that pydoover's
-# exporters do. Driven through cargo so it works from a plain checkout with
-# nothing built yet, which is the state CI is always in.
+# application binary a single `export [path] [--app-name NAME]` subcommand that
+# writes the config schema and, when the app has one, the UI schema -- with the
+# same read-merge-write over doover_config.json that pydoover's exporters do.
+# Driven through cargo so it works from a plain checkout with nothing built yet,
+# which is the state CI is always in.
+#
+# One command for every schema, which is why only the config exporter passes it
+# as its `rust_default`: see run_schema_export.
 RUST_EXPORT_COMMAND = "cargo run --quiet -- export doover_config.json"
 
 
@@ -638,20 +641,39 @@ def run_schema_export(
     python_default: str,
     app_name: str | None = None,
     cwd: Path | None = None,
+    rust_default: str | None = None,
 ) -> None:
     """Regenerate an app's schemas by running its own exporter.
 
-    Python apps run a console script under uv, as they always have. Rust apps
-    run their binary's built-in `export` subcommand, so the schema in
-    doover_config.json comes from the source in both languages rather than from
-    whatever was committed.
+    Python apps run a console script under uv, as they always have: one script
+    per schema, each with its own default.
+
+    Rust apps have no such split. The framework gives a binary one `export`
+    subcommand that writes every schema it has, so exactly one exporter drives
+    it -- the config one, which passes `rust_default`. The others do nothing for
+    a Rust app unless it names a command explicitly, because there is nothing
+    left for them to write and no second subcommand to call.
+
+    That asymmetry is not cosmetic. Inventing `cargo run -- export` as the
+    default for *any* schema kind means a repo whose binary is not a doover-rs
+    application runs it anyway: doover-device-agent's binary rejects `export`
+    and fails the publish, and doover-device-runtime's supervisor accepts any
+    argv, so it started supervising and hung a CI job for 75 minutes. Both had
+    already opted out of every exporter that existed when they were written; the
+    next one to be added found them again.
 
     `command` is the app's own `export_*_command`, honoured verbatim when set --
     an app whose binary is not what `cargo run` picks by default (a workspace
     with several) says so there rather than being unbuildable by CI.
     """
     if detect_language(app_dir) == "rs":
-        cmd = command or RUST_EXPORT_COMMAND
+        cmd = command or rust_default
+        if cmd is None:
+            print(
+                "Rust app: its `export` subcommand writes every schema it has, "
+                "and the config export already ran it. Skipping..."
+            )
+            return
         # The binary otherwise falls back to APP_KEY or its own file name, which
         # is not the application name in a repo whose binary is spelled with
         # hyphens and whose app is spelled with underscores.

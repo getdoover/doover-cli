@@ -14,6 +14,7 @@ from .utils.apps import (
     get_app_config,
     preserve_file,
     run_schema_export,
+    RUST_EXPORT_COMMAND,
 )
 
 app = typer.Typer(no_args_is_help=True)
@@ -65,6 +66,10 @@ def export(
             "export-config",
             app_name=app_config.name,
             cwd=app_fp,
+            # The one exporter that drives a Rust binary: its `export` writes
+            # every schema the app has, so the UI and notification exporters
+            # have nothing left to run.
+            rust_default=RUST_EXPORT_COMMAND,
         )
     else:
         config = get_app_config(app_fp, app_name=app_name)
