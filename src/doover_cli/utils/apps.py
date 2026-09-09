@@ -1,6 +1,7 @@
 import os
 import json
 import sys
+import tomllib
 import base64
 import shutil
 import contextlib
@@ -635,6 +636,28 @@ def detect_language(app_dir: Path) -> str | None:
 RUST_EXPORT_COMMAND = "cargo run --quiet -- export doover_config.json"
 
 
+def python_declares_script(app_dir: Path, script: str) -> bool | None:
+    """Whether `app_dir`'s pyproject.toml declares the `script` console script.
+
+    None when there is nothing to go on -- no pyproject.toml, or one this can't
+    read -- so a caller can fall back to running the script and finding out.
+    """
+    pyproject = app_dir / "pyproject.toml"
+    if not pyproject.exists():
+        return None
+    try:
+        data = tomllib.loads(pyproject.read_text())
+    except (tomllib.TOMLDecodeError, OSError):
+        return None
+
+    scripts = data.get("project", {}).get("scripts")
+    if not isinstance(scripts, dict):
+        # A pyproject with no scripts table declares no exporters at all, which
+        # is an answer rather than a gap.
+        return False
+    return script in scripts
+
+
 def run_schema_export(
     app_dir: Path,
     command: str | None,
@@ -642,6 +665,7 @@ def run_schema_export(
     app_name: str | None = None,
     cwd: Path | None = None,
     rust_default: str | None = None,
+    optional: bool = False,
 ) -> None:
     """Regenerate an app's schemas by running its own exporter.
 
@@ -680,6 +704,15 @@ def run_schema_export(
         if app_name and "--app-name" not in cmd:
             cmd = f"{cmd} --app-name {app_name}"
         run(cmd, cwd=app_dir)
+    elif (
+        optional
+        and command is None
+        and (python_declares_script(app_dir, python_default) is False)
+    ):
+        print(
+            f"App declares no `{python_default}` script, so it has no schema of "
+            "this kind. Skipping..."
+        )
     else:
         call_with_uv(command or python_default, in_shell=True, cwd=cwd)
 

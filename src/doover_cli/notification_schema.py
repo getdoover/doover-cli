@@ -46,15 +46,15 @@ def export(
         print("App requested no notification export. Skipping...")
         return
 
+    print("Exporting notification schema...")
     run_schema_export(
         root_fp,
         app_config.export_notification_command,
         "export-notifications",
+        optional=True,
         app_name=app_config.name,
         cwd=app_fp,
     )
-
-    print("Exporting notification schema...")
 
     if validate_ is True:
         print("Validating notification schema...")

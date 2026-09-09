@@ -144,6 +144,81 @@ class TestRunSchemaExport:
         assert calls["run"][0][0].endswith("explicit")
 
 
+class TestOptionalSchema:
+    """`optional=True` -- the notification schema, which most apps don't have.
+
+    An app declares its exporters in its own `[project.scripts]`, so the absence
+    of one there is the app saying it has no notifications. Running it anyway
+    meant `uv run export-notifications` failed on nearly every Python app: a red
+    error and a reported handled exception for the ordinary case.
+    """
+
+    def _pyproject(self, tmp_path, body):
+        (tmp_path / "pyproject.toml").write_text(body)
+        return tmp_path
+
+    def test_skipped_when_the_script_is_not_declared(self, tmp_path, calls):
+        self._pyproject(
+            tmp_path,
+            '[project.scripts]\nexport-config = "app.app_config:export"\n',
+        )
+
+        apps_utils.run_schema_export(
+            tmp_path, None, "export-notifications", app_name="foo", optional=True
+        )
+
+        assert calls["uv"] == []
+        assert calls["run"] == []
+
+    def test_run_when_the_script_is_declared(self, tmp_path, calls):
+        self._pyproject(
+            tmp_path,
+            "[project.scripts]\n"
+            'export-notifications = "app.app_notifications:export"\n',
+        )
+
+        apps_utils.run_schema_export(
+            tmp_path, None, "export-notifications", app_name="foo", optional=True
+        )
+
+        assert calls["uv"][0][0] == ("export-notifications",)
+
+    def test_an_explicit_command_is_never_probed(self, tmp_path, calls):
+        """An app naming its own exporter has said it has one, whatever the
+        scripts table looks like -- a second app in the repo exports through a
+        differently-named script."""
+        self._pyproject(tmp_path, '[project]\nname = "app"\n')
+
+        apps_utils.run_schema_export(
+            tmp_path,
+            "export-notifications-processor",
+            "export-notifications",
+            app_name="foo",
+            optional=True,
+        )
+
+        assert calls["uv"][0][0] == ("export-notifications-processor",)
+
+    def test_an_unreadable_pyproject_still_runs_the_export(self, tmp_path, calls):
+        """No answer is not the same as `no`: run it and let it fail loudly."""
+        self._pyproject(tmp_path, "this is not valid toml [[[")
+
+        apps_utils.run_schema_export(
+            tmp_path, None, "export-notifications", app_name="foo", optional=True
+        )
+
+        assert calls["uv"][0][0] == ("export-notifications",)
+
+    def test_a_required_schema_is_run_regardless(self, tmp_path, calls):
+        """Config and UI are not optional: every app of their type has one, so a
+        missing script there is a real failure worth surfacing."""
+        self._pyproject(tmp_path, '[project]\nname = "app"\n')
+
+        apps_utils.run_schema_export(tmp_path, None, "export-config", app_name="foo")
+
+        assert calls["uv"][0][0] == ("export-config",)
+
+
 class TestNoExport:
     """`export_config_command: NO_EXPORT` -- an app that holds no config of its
     own. Publishing one used to require giving it an exporter that wrote
