@@ -111,6 +111,7 @@ class LocalApplication(ControlApplication):
         allow_many: bool | None = None,
         config_schema: Any | None = None,
         ui_schema: Any | None = None,
+        notification_schema: Any | None = None,
         depends_on: list[str] | None = None,
         organisation: dict[str, Any] | str | int | None = None,
         approx_installs: int | None = None,
@@ -127,6 +128,7 @@ class LocalApplication(ControlApplication):
         build_widget_command: str | None = None,
         export_config_command: str | None = None,
         export_ui_command: str | None = None,
+        export_notification_command: str | None = None,
         generate_ui: bool = True,
         run_command: str | None = None,
         staging_config: dict[str, Any] | None = None,
@@ -145,6 +147,7 @@ class LocalApplication(ControlApplication):
             allow_many=allow_many,
             config_schema=config_schema,
             ui_schema=ui_schema,
+            notification_schema=notification_schema,
             depends_on=depends_on,
             organisation=organisation,
             approx_installs=approx_installs,
@@ -181,6 +184,7 @@ class LocalApplication(ControlApplication):
         self.build_args = build_args
         self.export_config_command = export_config_command
         self.export_ui_command = export_ui_command
+        self.export_notification_command = export_notification_command
         self.generate_ui = generate_ui
         self.run_command = run_command
         self.staging_config = staging_config or {}
@@ -306,10 +310,12 @@ class LocalApplication(ControlApplication):
             build_widget_command=data.get("build_widget_command"),
             export_config_command=data.get("export_config_command"),
             export_ui_command=data.get("export_ui_command"),
+            export_notification_command=data.get("export_notification_command"),
             generate_ui=data.get("generate_ui", True),
             run_command=data.get("run_command"),
             config_schema=data.get("config_schema"),
             ui_schema=data.get("ui_schema"),
+            notification_schema=data.get("notification_schema"),
             staging_config=data.get("staging_config", {}),
             icon_url=data.get("icon_url"),
             banner_url=data.get("banner_url"),
@@ -401,6 +407,7 @@ class LocalApplication(ControlApplication):
                 "lambda_config": self.lambda_config,
                 "config_schema": self.config_schema,
                 "ui_schema": self.ui_schema,
+                "notification_schema": self.notification_schema,
                 "icon_url": self.icon_url,
                 "banner_url": self.banner_url,
             }
@@ -417,6 +424,7 @@ class LocalApplication(ControlApplication):
             data["build_widget_command"] = self.build_widget_command
             data["export_config_command"] = self.export_config_command
             data["export_ui_command"] = self.export_ui_command
+            data["export_notification_command"] = self.export_notification_command
             data["generate_ui"] = self.generate_ui
             data["run_command"] = self.run_command
 
