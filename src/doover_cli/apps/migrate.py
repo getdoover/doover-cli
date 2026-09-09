@@ -58,7 +58,7 @@ REGISTRY_PROFILE_IDS = {
 
 # Generated from the app's Python/Rust at publish time. A committed copy is a
 # stale duplicate that nothing reads.
-GENERATED_FIELDS = ("config_schema", "ui_schema")
+GENERATED_FIELDS = ("config_schema", "ui_schema", "notification_schema")
 
 # Container registry credentials are minted by the control plane against the
 # app's publish permission now, so a registry profile no longer selects

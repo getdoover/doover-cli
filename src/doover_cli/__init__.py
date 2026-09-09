@@ -1,7 +1,7 @@
 from doover_cli.renderer import Renderer
 from typing import Annotated, Optional
 
-__version__ = "0.6.6"
+__version__ = "0.6.7"
 
 import click
 import typer
@@ -11,6 +11,7 @@ from pydoover.api.auth import ConfigManager
 from .apps.apps import app as apps_app
 from .apps.app_install import app as app_install_app
 from .config_schema import app as config_schema_app
+from .notification_schema import app as notification_schema_app
 from .ui_schema import app as ui_schema_app
 from .simulator import app as simulators_app
 from .agent import app as agents_app
@@ -40,6 +41,11 @@ app.add_typer(
     config_schema_app, name="config-schema", help="Manage application config schemas."
 )
 app.add_typer(ui_schema_app, name="ui-schema", help="Manage application UI schemas.")
+app.add_typer(
+    notification_schema_app,
+    name="notification-schema",
+    help="Manage application notification schemas.",
+)
 app.add_typer(
     simulators_app, name="simulator", help="Manage simulators and their configurations."
 )

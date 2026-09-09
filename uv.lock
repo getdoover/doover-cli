@@ -591,7 +591,7 @@ requires-dist = [
     { name = "jsf", specifier = ">=0.11.2" },
     { name = "paramiko", specifier = ">=3.5.1" },
     { name = "prompt-toolkit", specifier = ">=3.0.52" },
-    { name = "pydoover", specifier = ">=1.12.0" },
+    { name = "pydoover", specifier = ">=1.17.1" },
     { name = "pytz", specifier = ">=2025.2" },
     { name = "questionary", specifier = ">=1.10.0" },
     { name = "requests", specifier = ">=2.32.3" },
@@ -1337,15 +1337,15 @@ wheels = [
 
 [[package]]
 name = "pydoover"
-version = "1.12.0"
+version = "1.17.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
     { name = "httpx" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/20/6a/6250ccb49522966c7024f7cfdda6268941ca8eeeaa32c7ecb3e983e5fd1a/pydoover-1.12.0.tar.gz", hash = "sha256:ef3c4f89ad81ed46f457a0fc72052e1da609246977745f7530bd9ae653dc1771", size = 563024, upload-time = "2026-07-31T02:23:39.204Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d9/99/56164d2368604d81dedde8f969f777f2cfa75b6325cd7235c4a64413714d/pydoover-1.17.1.tar.gz", hash = "sha256:11ae6055a5af53aeb137c5a14fe38942596f7549cd9bdf20db571433f135503d", size = 608525, upload-time = "2026-09-09T03:17:32.98Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/44/c4/d70ae64e37d5ff8d68d9a833ec8771ffc30946174e453286b537ee418add/pydoover-1.12.0-py3-none-any.whl", hash = "sha256:d0b82371c7ad11b247aa278b3198ea7ea2bec4dc3b6886221ab33867acc6928f", size = 299364, upload-time = "2026-07-31T02:23:37.73Z" },
+    { url = "https://files.pythonhosted.org/packages/2b/8f/f17d1242881565ed5d93604dab48977891421f3d1a1fe189f6150af31ae8/pydoover-1.17.1-py3-none-any.whl", hash = "sha256:dc9e6a67007d161193372d884b691809c7c835409f8c50d6dacbec5dee0ce27a", size = 329229, upload-time = "2026-09-09T03:17:31.696Z" },
 ]
 
 [[package]]

@@ -26,6 +26,7 @@ import questionary
 
 
 from ..config_schema import export as export_config_command
+from ..notification_schema import export as export_notification_command
 from ..ui_schema import export as export_ui_command
 from ..utils.api import ProfileAnnotation
 from ..registry import is_doover_registry, login_for_push, publish_github_output
@@ -395,6 +396,16 @@ def _build_application_payload(
     # No None-stripping here: a key only reaches this point because the config
     # declared it, and declaring `"organisation_id": null` means clear it.
     return payload
+
+
+def _should_export_notifications(app_config) -> bool:
+    """Whether to try the notification exporter for this app.
+
+    Opt-out rather than opt-in so an app that adds notifications starts
+    publishing them without also having to remember a flag, but explicitly
+    skippable with ``"export_notification_command": "NO_EXPORT"``.
+    """
+    return getattr(app_config, "export_notification_command", None) != "NO_EXPORT"
 
 
 def _should_export_ui(app_config) -> bool:
@@ -1154,6 +1165,12 @@ def publish(
             help="Export the application UI schema before publishing.",
         ),
     ] = True,
+    export_notifications: Annotated[
+        bool,
+        typer.Option(
+            help="Export the application notification schema before publishing.",
+        ),
+    ] = True,
     build_widget: Annotated[
         bool,
         typer.Option(
@@ -1254,6 +1271,21 @@ def publish(
                 typer.confirm("Do you want to continue?", abort=True)
             else:
                 rich.print("[green]Exported UI schema.[/green]")
+
+        # Most apps declare no notifications, and the exporter is only present
+        # on those that do, so a missing one is not worth a prompt -- unlike the
+        # config and UI exports, which every app of their type has.
+        if export_notifications and _should_export_notifications(app_config):
+            try:
+                ctx.invoke(
+                    export_notification_command, ctx, app_fp=root_fp, validate_=True
+                )
+            except Exception as exc:
+                rich.print(
+                    f"[yellow]Skipping notification schema export: {exc}[/yellow]"
+                )
+            else:
+                rich.print("[green]Exported notification schema.[/green]")
 
         app_config = get_app_config(root_fp)
         resolved_staging = _resolve_staging(staging)
