@@ -33,6 +33,7 @@ from ..registry import is_doover_registry, login_for_push, publish_github_output
 from ..utils.apps import (
     PACKAGE_APP_TYPES,
     discover_apps,
+    filter_create_only,
     get_app_directory,
     call_with_uv,
     get_docker_path,
@@ -126,6 +127,67 @@ def _detect_git_commit(root_fp: Path) -> str:
     except OSError:
         return ""
     return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _normalise_remote_url(remote: str) -> str | None:
+    """A git remote as a browsable https URL, or None if it isn't one.
+
+    Remotes here are SSH by convention, which is not a URL anyone can open, and
+    the field is rendered as a link.
+    """
+    remote = remote.strip()
+    if not remote:
+        return None
+
+    # scp-style: git@host:org/repo.git
+    if "://" not in remote and ":" in remote and not remote.startswith("/"):
+        userhost, _, path = remote.partition(":")
+        host = userhost.rpartition("@")[2]
+        if not host or not path:
+            return None
+        remote = f"https://{host}/{path}"
+    elif remote.startswith(("ssh://", "git://")):
+        remote = "https://" + remote.split("://", 1)[1]
+    elif not remote.startswith(("http://", "https://")):
+        # A local path or a protocol nothing can browse.
+        return None
+
+    scheme, _, rest = remote.partition("://")
+    # Strip credentials -- a token embedded in a CI checkout's remote must not
+    # be published.
+    rest = rest.rpartition("@")[2]
+    remote = f"{scheme}://{rest}"
+
+    if remote.endswith(".git"):
+        remote = remote[: -len(".git")]
+    remote = remote.rstrip("/")
+    return remote or None
+
+
+def _detect_repository_url(root_fp: Path) -> str | None:
+    """Best-effort repository URL for the app dir, from CI or `origin`."""
+    server = os.environ.get("GITHUB_SERVER_URL")
+    repository = os.environ.get("GITHUB_REPOSITORY")
+    if server and repository:
+        return f"{server.rstrip('/')}/{repository}"
+
+    project_url = os.environ.get("CI_PROJECT_URL")
+    if project_url:
+        return project_url.rstrip("/")
+
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=root_fp,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    return _normalise_remote_url(result.stdout)
 
 
 def _is_multi_platform(build_args: str) -> bool:
@@ -454,6 +516,47 @@ def _resolve_application_id(client, app_config, *, staging: bool) -> int | None:
     if len(matches) == 1:
         return int(matches[0].id)
     return None
+
+
+def _fetch_existing_application(client, app_config, *, staging: bool):
+    """The app as the cloud currently holds it, or None if it doesn't exist yet.
+
+    Publishing is a patch, and some fields are only seeded on create -- see
+    CREATE_ONLY_FIELDS -- so the payload can't be decided without knowing what is
+    already there.
+    """
+    app_id = _get_persisted_application_id(app_config, staging=staging)
+    if app_id is not None:
+        try:
+            return client.applications.retrieve(str(app_id))
+        except Exception:
+            # A pinned id that doesn't resolve is the publish's problem, not
+            # ours; it fails with a clearer error a few lines later.
+            return None
+
+    try:
+        page = client.applications.list(
+            name=app_config.name,
+            archived=False,
+            page=1,
+            per_page=100,
+        )
+    except Exception:
+        return None
+
+    matches = [
+        item for item in page.results if getattr(item, "name", None) == app_config.name
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _report_create_only_skips(skipped: dict) -> None:
+    for field, (cloud_value, config_value) in sorted(skipped.items()):
+        rich.print(
+            f"[yellow]{field}: keeping {cloud_value!r} from the cloud "
+            f"(doover_config.json says {config_value!r}). This field is only "
+            f"seeded on create -- change it in the admin portal.[/yellow]"
+        )
 
 
 def _image_package_uri(app_config) -> str | None:
@@ -1295,6 +1398,13 @@ def publish(
             include_deployment_data=True,
         )
 
+    # Seeded from the checkout when doover_config.json doesn't name one. It is
+    # create-only, so a detected value never overwrites what the cloud holds.
+    if "repository_url" not in payload:
+        detected_repository = _detect_repository_url(root_fp)
+        if detected_repository:
+            payload["repository_url"] = detected_repository
+
     client, renderer = get_state()
 
     # The publish endpoints are organisation-scoped: without the
@@ -1321,6 +1431,13 @@ def publish(
     rich.print(
         f"Updating application on doover site ({_control_base_url() or 'unknown base URL'})...\n"
     )
+
+    with renderer.loading("Reading current application..."):
+        existing = _fetch_existing_application(
+            client, app_config, staging=resolved_staging
+        )
+    payload, skipped = filter_create_only(payload, existing)
+    _report_create_only_skips(skipped)
 
     try:
         with renderer.loading("Publishing application..."):

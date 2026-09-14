@@ -43,10 +43,34 @@ RETIRED_FIELDS: dict[str, str | None] = {
     # app at the wrong function.
     "lambda_arn": None,
     "stars": None,
+    "long_description_ui": None,
+    "long_description_source": None,
 }
 
 # Never included in a publish payload, whatever the config says.
-NEVER_SENT = frozenset({"lambda_arn", "stars"})
+NEVER_SENT = frozenset(
+    {
+        "lambda_arn",
+        "stars",
+        "long_description_ui",
+        "long_description_source",
+    }
+)
+
+# Seeded from doover_config.json when the app is created, or when the cloud has
+# no value yet. After that the cloud wins and publishing leaves them alone, so
+# an edit made in the admin portal survives the next deploy.
+CREATE_ONLY_FIELDS = frozenset(
+    {
+        "display_name",
+        "description",
+        "visibility",
+        "allow_many",
+        "icon_url",
+        "banner_url",
+        "repository_url",
+    }
+)
 
 
 def resolve_ref(data: dict[str, Any], canonical: str) -> Any:
@@ -63,6 +87,39 @@ def resolve_ref(data: dict[str, Any], canonical: str) -> Any:
             )
             return data[legacy]
     return None
+
+
+def _has_cloud_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    return True
+
+
+def filter_create_only(
+    payload: dict[str, Any], existing: Any | None
+) -> tuple[dict[str, Any], dict[str, tuple[Any, Any]]]:
+    """Drop CREATE_ONLY_FIELDS the cloud already has a value for.
+
+    Returns the payload to send and the fields that were held back, as
+    `{field: (cloud_value, config_value)}`.
+    """
+    if existing is None:
+        return payload, {}
+
+    kept = dict(payload)
+    skipped: dict[str, tuple[Any, Any]] = {}
+    for field in CREATE_ONLY_FIELDS:
+        if field not in kept:
+            continue
+        cloud_value = getattr(existing, field, None)
+        if not _has_cloud_value(cloud_value):
+            continue
+        config_value = kept.pop(field)
+        if cloud_value != config_value:
+            skipped[field] = (cloud_value, config_value)
+    return kept, skipped
 
 
 def warn_retired_fields(data: dict[str, Any]) -> None:
@@ -123,6 +180,7 @@ class LocalApplication(ControlApplication):
         config_profiles: list[Any] | None = None,
         icon_url: str | None = None,
         banner_url: str | None = None,
+        repository_url: str | None = None,
         key: str | None = None,
         build_args: str | None = None,
         widget: str | Path | None = None,
@@ -159,6 +217,7 @@ class LocalApplication(ControlApplication):
             config_profiles=config_profiles,
             icon_url=icon_url,
             banner_url=banner_url,
+            repository_url=repository_url,
         )
 
         path = (
@@ -320,6 +379,7 @@ class LocalApplication(ControlApplication):
             staging_config=data.get("staging_config", {}),
             icon_url=data.get("icon_url"),
             banner_url=data.get("banner_url"),
+            repository_url=data.get("repository_url"),
             base_path=app_base,
             deployment_folder=data.get("deployment_folder"),
         )
@@ -411,6 +471,7 @@ class LocalApplication(ControlApplication):
                 "notification_schema": self.notification_schema,
                 "icon_url": self.icon_url,
                 "banner_url": self.banner_url,
+                "repository_url": self.repository_url,
             }
         )
 

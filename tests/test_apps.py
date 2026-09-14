@@ -1,4 +1,5 @@
 import re
+import subprocess
 from contextlib import nullcontext
 from types import SimpleNamespace
 
@@ -1562,3 +1563,68 @@ def test_publish_processor_package_uses_package_zip(tmp_path):
     assert response == {"id": 303}
     assert captured["application_id"] == "303"
     assert captured["body"] == {"file": package_fp}
+
+
+@pytest.mark.parametrize(
+    "remote,expected",
+    [
+        (
+            "git@github.com:spaneng/analog-level-sensor.git",
+            "https://github.com/spaneng/analog-level-sensor",
+        ),
+        (
+            "ssh://git@github.com/spaneng/analog-level-sensor.git",
+            "https://github.com/spaneng/analog-level-sensor",
+        ),
+        (
+            "https://github.com/spaneng/analog-level-sensor.git\n",
+            "https://github.com/spaneng/analog-level-sensor",
+        ),
+        # A CI checkout's remote can carry a token; publishing it would leak it.
+        (
+            "https://x-access-token:secret@github.com/spaneng/app.git",
+            "https://github.com/spaneng/app",
+        ),
+        ("/srv/git/local-repo.git", None),
+        ("", None),
+    ],
+)
+def test_normalise_remote_url(remote, expected):
+    assert apps_app._normalise_remote_url(remote) == expected
+
+
+def test_detect_repository_url_prefers_github_actions_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("GITHUB_SERVER_URL", "https://github.com")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "spaneng/analog-level-sensor")
+
+    assert (
+        apps_app._detect_repository_url(tmp_path)
+        == "https://github.com/spaneng/analog-level-sensor"
+    )
+
+
+def test_detect_repository_url_falls_back_to_the_origin_remote(monkeypatch, tmp_path):
+    monkeypatch.delenv("GITHUB_SERVER_URL", raising=False)
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    monkeypatch.delenv("CI_PROJECT_URL", raising=False)
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "git@github.com:spaneng/tracker.git"],
+        cwd=tmp_path,
+        check=True,
+    )
+
+    assert (
+        apps_app._detect_repository_url(tmp_path)
+        == "https://github.com/spaneng/tracker"
+    )
+
+
+def test_detect_repository_url_is_none_outside_a_repo(monkeypatch, tmp_path):
+    monkeypatch.delenv("GITHUB_SERVER_URL", raising=False)
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    monkeypatch.delenv("CI_PROJECT_URL", raising=False)
+    # An empty HOME keeps a parent repo's origin (this checkout's) out of it.
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
+
+    assert apps_app._detect_repository_url(tmp_path) is None

@@ -313,6 +313,136 @@ def test_retired_fields_are_never_published(tmp_path):
         assert field not in payload, field
 
 
+class _Existing:
+    def __init__(self, **fields):
+        for key, value in fields.items():
+            setattr(self, key, value)
+
+
+def test_portal_owned_long_description_fields_are_never_published(tmp_path):
+    app_config = LocalApplication.from_config(
+        {
+            "name": "tracker-app",
+            "long_description_ui": "written in the portal",
+            "long_description_source": "ui",
+        },
+        tmp_path,
+    )
+
+    payload = app_config.to_request_payload()
+
+    assert "long_description_ui" not in payload
+    assert "long_description_source" not in payload
+
+
+def test_create_only_fields_are_sent_when_the_app_does_not_exist(tmp_path):
+    app_config = LocalApplication.from_config(
+        {
+            "name": "tracker-app",
+            "display_name": "Tracker App",
+            "visibility": "PUB",
+        },
+        tmp_path,
+    )
+
+    payload, skipped = apps_utils.filter_create_only(
+        app_config.to_request_payload(), None
+    )
+
+    assert payload["display_name"] == "Tracker App"
+    assert payload["visibility"] == "PUB"
+    assert skipped == {}
+
+
+def test_create_only_fields_are_sent_when_the_cloud_has_no_value(tmp_path):
+    app_config = LocalApplication.from_config(
+        {
+            "name": "tracker-app",
+            "display_name": "Tracker App",
+            "icon_url": "https://example.com/icon.png",
+        },
+        tmp_path,
+    )
+
+    payload, skipped = apps_utils.filter_create_only(
+        app_config.to_request_payload(),
+        _Existing(display_name="   ", icon_url=None),
+    )
+
+    assert payload["display_name"] == "Tracker App"
+    assert payload["icon_url"] == "https://example.com/icon.png"
+    assert skipped == {}
+
+
+def test_create_only_fields_do_not_overwrite_the_cloud(tmp_path):
+    """A portal edit has to survive the next deploy — that's the whole point."""
+    app_config = LocalApplication.from_config(
+        {
+            "name": "tracker-app",
+            "display_name": "Tracker App",
+            "description": "A tracker app",
+            "visibility": "PUB",
+            "allow_many": True,
+            "image_name": "registry.doover.com/apps/tracker:main",
+        },
+        tmp_path,
+    )
+
+    payload, skipped = apps_utils.filter_create_only(
+        app_config.to_request_payload(),
+        _Existing(
+            display_name="Renamed In Portal",
+            description="A tracker app",
+            visibility="PRI",
+            allow_many=False,
+        ),
+    )
+
+    for field in ("display_name", "description", "visibility", "allow_many"):
+        assert field not in payload, field
+    # Only a value that actually differs is worth telling the user about.
+    assert set(skipped) == {"display_name", "visibility", "allow_many"}
+    assert skipped["display_name"] == ("Renamed In Portal", "Tracker App")
+    # Everything outside the create-only set still publishes.
+    assert payload["image_name"] == "registry.doover.com/apps/tracker:main"
+
+
+def test_repository_url_is_declarable_and_create_only(tmp_path):
+    app_config = LocalApplication.from_config(
+        {
+            "name": "tracker-app",
+            "repository_url": "https://github.com/spaneng/tracker",
+        },
+        tmp_path,
+    )
+
+    payload = app_config.to_request_payload()
+    assert payload["repository_url"] == "https://github.com/spaneng/tracker"
+
+    kept, skipped = apps_utils.filter_create_only(
+        payload, _Existing(repository_url="https://github.com/spaneng/moved")
+    )
+    assert "repository_url" not in kept
+    assert set(skipped) == {"repository_url"}
+
+
+def test_long_description_still_publishes_over_the_cloud(tmp_path):
+    """Only the presentation fields are create-only; the README is code-owned."""
+    readme = tmp_path / "README.md"
+    readme.write_text("# Tracker\n\nFrom the repo.")
+    app_config = LocalApplication.from_config(
+        {"name": "tracker-app", "long_description": "README.md"},
+        tmp_path,
+    )
+
+    payload, _ = apps_utils.filter_create_only(
+        app_config.to_request_payload(),
+        _Existing(long_description="something older"),
+    )
+
+    assert payload["long_description"] == "# Tracker\n\nFrom the repo."
+
+
 @pytest.mark.parametrize(
     "build_args,expected",
     [
