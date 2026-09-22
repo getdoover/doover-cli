@@ -5,7 +5,7 @@ and `doover tunnel` to the doover-tunnel binary before `cli` (typer, pydoover,
 docker, ...) loads. `app` and `main` are still reachable here, lazily.
 """
 
-__version__ = "0.7.0"
+__version__ = "0.7.1"
 
 
 def __getattr__(name: str):
