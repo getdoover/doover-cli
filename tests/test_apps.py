@@ -72,6 +72,8 @@ class FakeAppConfig:
         self.type = "DEV"
         self.staging_config = {}
         self.widget_path = None
+        self.icon_path = None
+        self.banner_path = None
         self.build_widget_command = None
         self.save_calls = 0
         self._payload = {

@@ -152,6 +152,18 @@ def preserve_file(path: Path):
             path.unlink()
 
 
+def _resolve_local_path(
+    value: str | Path | None, base_path: Path | None
+) -> Path | None:
+    """A path from doover_config.json, resolved against the app directory."""
+    if not value:
+        return None
+    path = Path(value)
+    if not path.is_absolute() and base_path is not None:
+        path = base_path / path
+    return path
+
+
 class LocalApplication(ControlApplication):
     _model_name = None
 
@@ -183,6 +195,8 @@ class LocalApplication(ControlApplication):
         repository_url: str | None = None,
         key: str | None = None,
         build_args: str | None = None,
+        icon: str | Path | None = None,
+        banner: str | Path | None = None,
         widget: str | Path | None = None,
         build_widget_command: str | None = None,
         export_config_command: str | None = None,
@@ -238,6 +252,14 @@ class LocalApplication(ControlApplication):
             self.widget_path: Path | None = widget_path
         else:
             self.widget_path = None
+
+        # Artwork is uploaded, not linked: these are paths in the repo, and they
+        # are deliberately not request fields. `icon_url`/`banner_url` still
+        # publish an externally hosted image for apps that have one.
+        self._icon_raw = str(icon) if icon else None
+        self._banner_raw = str(banner) if banner else None
+        self.icon_path = _resolve_local_path(icon, base_path)
+        self.banner_path = _resolve_local_path(banner, base_path)
 
         self.build_widget_command = build_widget_command
         self.key = key
@@ -366,6 +388,8 @@ class LocalApplication(ControlApplication):
                 data, "container_registry_profile_id"
             ),
             lambda_config=data.get("lambda_config"),
+            icon=data.get("icon"),
+            banner=data.get("banner"),
             widget=data.get("widget"),
             build_widget_command=data.get("build_widget_command"),
             export_config_command=data.get("export_config_command"),
@@ -474,6 +498,12 @@ class LocalApplication(ControlApplication):
                 "repository_url": self.repository_url,
             }
         )
+
+        if self._icon_raw is not None:
+            data["icon"] = self._icon_raw
+
+        if self._banner_raw is not None:
+            data["banner"] = self._banner_raw
 
         if self._widget_raw is not None:
             data["widget"] = self._widget_raw

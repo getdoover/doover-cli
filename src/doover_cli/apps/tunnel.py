@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
+import sys
+import sysconfig
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
@@ -10,10 +16,7 @@ from ..utils.api import (
 )
 from ..utils.crud import (
     LookupChoice,
-    build_create_command,
-    build_update_command,
     prompt_resource,
-    resource_autocomplete,
 )
 from ..utils.crud.lookup import resolve_resource_lookup
 from ..utils.crud.prompting import (
@@ -34,7 +37,6 @@ if TYPE_CHECKING:
     from ..renderer import RendererBase
 
 
-app = typer.Typer(no_args_is_help=True)
 device_app = typer.Typer(no_args_is_help=True)
 
 _TUNNEL_LABEL_ATTRS = ("name",)
@@ -44,36 +46,6 @@ _DEVICE_LABEL_ATTRS = ("display_name", "name")
 def get_state() -> tuple["ControlClient", "RendererBase"]:
     session = state.session
     return session.get_control_client(), state.renderer
-
-
-def _tunnel_autocomplete() -> object:
-    return resource_autocomplete(
-        Tunnel,
-        archived=None,
-        ordering="name",
-        label_attrs=_TUNNEL_LABEL_ATTRS,
-        searchable_attrs=_TUNNEL_LABEL_ATTRS,
-    )
-
-
-def _resolve_tunnel_id(
-    client: "ControlClient",
-    renderer: "RendererBase",
-    *,
-    action: str,
-    lookup: str | None,
-) -> int:
-    return prompt_resource(
-        Tunnel,
-        client,
-        renderer,
-        action=action,
-        lookup=lookup,
-        archived=None,
-        ordering="name",
-        label_attrs=_TUNNEL_LABEL_ATTRS,
-        searchable_attrs=_TUNNEL_LABEL_ATTRS,
-    )
 
 
 def _resolve_device_context_id(
@@ -230,174 +202,115 @@ def _resolve_device_tunnel_id(
 
 
 # ---------------------------------------------------------------------------
-# Top-level: doover tunnel ...
+# Top-level: doover tunnel <device> [tunnel]
 # ---------------------------------------------------------------------------
 
+_INSTALL_HINT = (
+    "doover-tunnel is not installed alongside doover-cli. Reinstall with "
+    "`pip install -U doover-cli` (or `uv tool install -U doover-cli`)."
+)
 
-@app.command(name="list")
-def list_(
-    ordering: Annotated[
+
+def _doover_tunnel_binary() -> str:
+    """The `doover-tunnel` binary the `doover-tunnel` wheel installs next to us."""
+    name = "doover-tunnel.exe" if os.name == "nt" else "doover-tunnel"
+    candidates = [
+        Path(sys.argv[0]).resolve().parent / name,
+        Path(sysconfig.get_path("scripts")) / name,
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    found = shutil.which("doover-tunnel")
+    if found:
+        return found
+    raise typer.BadParameter(_INSTALL_HINT)
+
+
+def _exec(args: list[str]) -> None:
+    if os.name == "nt":
+        raise typer.Exit(subprocess.call(args))
+    os.execv(args[0], args)
+
+
+def connect(
+    ctx: typer.Context,
+    device: Annotated[
         str | None,
+        typer.Argument(help="Device ID or exact display name/name."),
+    ] = None,
+    tunnel: Annotated[
+        str | None,
+        typer.Argument(
+            help="Tunnel name or ID on the device. Optional when it has one TCP tunnel."
+        ),
+    ] = None,
+    port: Annotated[
+        int | None,
         typer.Option(
-            help="Sort expression passed directly to the API, for example name or -name.",
+            "--port", "-p", help="Local port to listen on. Default: a free one."
         ),
     ] = None,
-    page: Annotated[int | None, typer.Option(help="Page number to request.")] = None,
-    per_page: Annotated[
-        int | None, typer.Option("--per-page", help="Number of records per page.")
-    ] = None,
-    search: Annotated[str | None, typer.Option(help="Full-text search term.")] = None,
-    _profile: ProfileAnnotation = None,
-):
-    """List tunnels across all devices you can access."""
-    _ = _profile
-    client, renderer = get_state()
-
-    with renderer.loading("Loading tunnels..."):
-        response = client.tunnels.list(
-            ordering=ordering,
-            page=page,
-            per_page=per_page,
-            search=search,
-        )
-
-    renderer.render_list(response)
-
-
-@app.command()
-def get(
-    tunnel: Annotated[
-        str | None,
-        typer.Argument(
-            help="Tunnel ID or exact name to retrieve.",
-            autocompletion=_tunnel_autocomplete(),
+    ssh: Annotated[
+        bool,
+        typer.Option(
+            "--ssh",
+            help="Start ssh through the tunnel and close it when ssh exits. "
+            "Arguments after `--` go to ssh.",
         ),
-    ] = None,
-    _profile: ProfileAnnotation = None,
-):
-    """Get a tunnel by ID or name."""
-    _ = _profile
-    client, renderer = get_state()
-
-    resolved_id = _resolve_tunnel_id(
-        client,
-        renderer,
-        action="get",
-        lookup=tunnel,
-    )
-
-    with renderer.loading("Loading tunnel..."):
-        response = client.tunnels.retrieve(str(resolved_id))
-
-    renderer.render(response)
-
-
-create = build_create_command(
-    model_cls=Tunnel,
-    command_help="Create a tunnel.",
-    get_state=lambda: get_state(),
-)
-app.command()(create)
-
-
-update = build_update_command(
-    model_cls=Tunnel,
-    command_help="Update a tunnel.",
-    get_state=lambda: get_state(),
-    resource_id_param_name="tunnel",
-    resource_id_help="Tunnel ID or exact name to update.",
-)
-app.command()(update)
-
-
-@app.command()
-def delete(
-    tunnel: Annotated[
-        str | None,
-        typer.Argument(
-            help="Tunnel ID or exact name to delete.",
-            autocompletion=_tunnel_autocomplete(),
-        ),
-    ] = None,
-    yes: Annotated[
-        bool, typer.Option("--yes", help="Delete without confirmation.")
     ] = False,
-    _profile: ProfileAnnotation = None,
-):
-    """Permanently delete a tunnel."""
-    _ = _profile
-    client, renderer = get_state()
-
-    resolved_id = _resolve_tunnel_id(
-        client,
-        renderer,
-        action="delete",
-        lookup=tunnel,
-    )
-
-    if not yes:
-        typer.confirm(f"Permanently delete tunnel {resolved_id}?", abort=True)
-
-    with renderer.loading("Deleting tunnel..."):
-        client.tunnels.delete(str(resolved_id))
-
-    print(f"Deleted tunnel {resolved_id}.")
-
-
-@app.command()
-def activate(
-    tunnel: Annotated[
-        str | None,
-        typer.Argument(
-            help="Tunnel ID or exact name to activate.",
-            autocompletion=_tunnel_autocomplete(),
+    ttl: Annotated[
+        int | None,
+        typer.Option(
+            help="Session lifetime in minutes. Default: the tunnel's timeout."
         ),
     ] = None,
     _profile: ProfileAnnotation = None,
 ):
-    """Activate a tunnel (open the underlying connection on the device)."""
+    """Open a private tunnel to a device and forward it to localhost until Ctrl-C.
+
+    Nothing is exposed publicly: your laptop and the device both connect out
+    to the Doover relay, which bridges them. Point any TCP tool at the local
+    address it prints (ssh, Modbus, Foxglove, ...).
+    """
     _ = _profile
     client, renderer = get_state()
+    device_id = _resolve_device_context_id(client, renderer, device, action="tunnel to")
+    args = [_doover_tunnel_binary(), "open", str(device_id)]
+    if tunnel:
+        args.append(tunnel)
+    args += ["--profile", state.profile_name]
+    if port is not None:
+        args += ["--port", str(port)]
+    if ttl is not None:
+        args += ["--ttl", str(ttl)]
+    if ssh:
+        args.append("--ssh")
+    if ctx.args:
+        args += ["--", *ctx.args]
+    _exec(args)
 
-    resolved_id = _resolve_tunnel_id(
-        client,
-        renderer,
-        action="activate",
-        lookup=tunnel,
-    )
 
-    with renderer.loading("Activating tunnel..."):
-        response = client.tunnels.activate(str(resolved_id), body={})
-
-    renderer.render(response)
-
-
-@app.command()
-def deactivate(
+def ssh(
+    ctx: typer.Context,
+    device: Annotated[
+        str | None,
+        typer.Argument(help="Device ID or exact display name/name."),
+    ] = None,
     tunnel: Annotated[
         str | None,
-        typer.Argument(
-            help="Tunnel ID or exact name to deactivate.",
-            autocompletion=_tunnel_autocomplete(),
+        typer.Argument(help="Tunnel name or ID. Optional when the device has one."),
+    ] = None,
+    ttl: Annotated[
+        int | None,
+        typer.Option(
+            help="Session lifetime in minutes. Default: the tunnel's timeout."
         ),
     ] = None,
     _profile: ProfileAnnotation = None,
 ):
-    """Deactivate a tunnel (close the underlying connection on the device)."""
-    _ = _profile
-    client, renderer = get_state()
-
-    resolved_id = _resolve_tunnel_id(
-        client,
-        renderer,
-        action="deactivate",
-        lookup=tunnel,
-    )
-
-    with renderer.loading("Deactivating tunnel..."):
-        response = client.tunnels.deactivate(str(resolved_id), body={})
-
-    renderer.render(response)
+    """SSH to a device through a private tunnel (`doover tunnel --ssh`)."""
+    connect(ctx, device, tunnel, None, True, ttl, _profile)
 
 
 # ---------------------------------------------------------------------------

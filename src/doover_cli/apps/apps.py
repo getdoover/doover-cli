@@ -1286,6 +1286,13 @@ def publish(
             help="Upload the widget when publishing. Disable with --no-put-widget.",
         ),
     ] = True,
+    put_artwork: Annotated[
+        bool,
+        typer.Option(
+            help="Upload the icon and banner when publishing. "
+            "Disable with --no-put-artwork.",
+        ),
+    ] = True,
     build_package: Annotated[
         bool,
         typer.Option(
@@ -1491,6 +1498,29 @@ def publish(
                     body={"file": app_config.widget_path},
                 )
             rich.print("[green]Widget uploaded.[/green]")
+
+    artwork = {
+        kind: path
+        for kind, path in (
+            ("icon", app_config.icon_path),
+            ("banner", app_config.banner_path),
+        )
+        if path is not None
+    }
+    if artwork and put_artwork:
+        for kind, path in artwork.items():
+            if not path.exists():
+                rich.print(f"[red]{kind.title()} file not found at {path}.[/red]")
+                raise typer.Exit(1)
+
+        with renderer.loading("Uploading artwork..."):
+            client.upload_application_artwork(
+                str(application_id),
+                **artwork,
+            )
+        rich.print(
+            f"[green]{', '.join(sorted(artwork)).capitalize()} uploaded.[/green]"
+        )
 
     if app_config.type in PACKAGE_APP_TYPES:
         image_uri = _image_package_uri(app_config)
