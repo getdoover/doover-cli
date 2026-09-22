@@ -1,11 +1,5 @@
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
-import sys
-import sysconfig
-from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
@@ -30,6 +24,7 @@ from ..utils.crud.values import (
     extract_model_values,
     normalize_model_values,
 )
+from ..tunnel_exec import INSTALL_HINT, exec_binary, find_binary
 from ..utils.state import state
 
 if TYPE_CHECKING:
@@ -203,34 +198,18 @@ def _resolve_device_tunnel_id(
 
 # ---------------------------------------------------------------------------
 # Top-level: doover tunnel <device> [tunnel]
+#
+# With a device argument these never run: the console entry point execs the
+# binary before the CLI loads (tunnel_exec). They remain for the bare form,
+# which prompts for the device, and for global options before the verb.
 # ---------------------------------------------------------------------------
-
-_INSTALL_HINT = (
-    "doover-tunnel is not installed alongside doover-cli. Reinstall with "
-    "`pip install -U doover-cli` (or `uv tool install -U doover-cli`)."
-)
 
 
 def _doover_tunnel_binary() -> str:
-    """The `doover-tunnel` binary the `doover-tunnel` wheel installs next to us."""
-    name = "doover-tunnel.exe" if os.name == "nt" else "doover-tunnel"
-    candidates = [
-        Path(sys.argv[0]).resolve().parent / name,
-        Path(sysconfig.get_path("scripts")) / name,
-    ]
-    for candidate in candidates:
-        if candidate.is_file():
-            return str(candidate)
-    found = shutil.which("doover-tunnel")
-    if found:
-        return found
-    raise typer.BadParameter(_INSTALL_HINT)
-
-
-def _exec(args: list[str]) -> None:
-    if os.name == "nt":
-        raise typer.Exit(subprocess.call(args))
-    os.execv(args[0], args)
+    found = find_binary()
+    if found is None:
+        raise typer.BadParameter(INSTALL_HINT)
+    return found
 
 
 def connect(
@@ -276,7 +255,7 @@ def connect(
     _ = _profile
     client, renderer = get_state()
     device_id = _resolve_device_context_id(client, renderer, device, action="tunnel to")
-    args = [_doover_tunnel_binary(), "open", str(device_id)]
+    args = [_doover_tunnel_binary(), "ssh" if ssh else "open", str(device_id)]
     if tunnel:
         args.append(tunnel)
     args += ["--profile", state.profile_name]
@@ -284,11 +263,9 @@ def connect(
         args += ["--port", str(port)]
     if ttl is not None:
         args += ["--ttl", str(ttl)]
-    if ssh:
-        args.append("--ssh")
     if ctx.args:
         args += ["--", *ctx.args]
-    _exec(args)
+    exec_binary(args)
 
 
 def ssh(
@@ -309,7 +286,11 @@ def ssh(
     ] = None,
     _profile: ProfileAnnotation = None,
 ):
-    """SSH to a device through a private tunnel (`doover tunnel --ssh`)."""
+    """SSH to a device through a private tunnel.
+
+    Uses the device's SSH tunnel, creating one (localhost:22, the device
+    type's ssh user) if it has none. Arguments after `--` go to ssh.
+    """
     connect(ctx, device, tunnel, None, True, ttl, _profile)
 
 

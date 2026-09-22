@@ -11,7 +11,7 @@ dependencies = [
     "jsf>=0.11.2",
     "paramiko>=3.5.1",
     "pydoover>=1.17.1",
-    "doover-tunnel>=0.1,<0.2",
+    "doover-tunnel>=0.1.2,<0.2",
     "pytz>=2025.2",
     "questionary>=1.10.0",
     "requests>=2.32.3",
@@ -31,7 +31,7 @@ build-backend = "hatchling.build"
 path = "src/doover_cli/__init__.py"
 
 [project.scripts]
-doover = "doover_cli:main"
+doover = "doover_cli.entry:main"
 docker-credential-doover = "doover_cli.registry:credential_helper"
 
 [dependency-groups]

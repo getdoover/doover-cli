@@ -589,7 +589,7 @@ requires-dist = [
     { name = "click", specifier = ">=8.3.1" },
     { name = "click-prompt", specifier = ">=0.6.3" },
     { name = "docker", specifier = ">=7.1.0" },
-    { name = "doover-tunnel", specifier = ">=0.1,<0.2" },
+    { name = "doover-tunnel", specifier = ">=0.1.2,<0.2" },
     { name = "jsf", specifier = ">=0.11.2" },
     { name = "paramiko", specifier = ">=3.5.1" },
     { name = "prompt-toolkit", specifier = ">=3.0.52" },
@@ -613,13 +613,13 @@ dev = [
 
 [[package]]
 name = "doover-tunnel"
-version = "0.1.1"
+version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5c/f0/3f9d885ec1884ace2ad353195f8444a2ab8ead21b2112d0f357605d65f21/doover_tunnel-0.1.1-py3-none-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:e246a88333e8c3372250bb15b69b417dbecee4ecb826d184ae5f4a218be268a4", size = 4680093, upload-time = "2026-09-22T03:22:15.424Z" },
-    { url = "https://files.pythonhosted.org/packages/ab/6d/baa439497e34f837a42df4b19a13381029001344f64805cfec519043287b/doover_tunnel-0.1.1-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:8406f192d21399332cfa53996ebf8fecc9691081318e0138e4c42870457aab73", size = 2418285, upload-time = "2026-09-22T03:22:17.294Z" },
-    { url = "https://files.pythonhosted.org/packages/76/b6/45aba0b934bc1e1c408dbf50853fc6b3983317d1821b8085562da494db8b/doover_tunnel-0.1.1-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:ad90b21b454742e94a04dae0000142cfb35648a523e4992faf81fd578fdf3f75", size = 2529447, upload-time = "2026-09-22T03:22:18.776Z" },
-    { url = "https://files.pythonhosted.org/packages/1a/52/aa17cdf91ba79cf6cef7c4ecaf369b804635a301ae9b9b8f9820e4766476/doover_tunnel-0.1.1-py3-none-win_amd64.whl", hash = "sha256:a1f15efdbc29d76e6461aad8f444c45dca24b844f1f643dfb1b5e91ea6859c48", size = 2567146, upload-time = "2026-09-22T03:22:20.344Z" },
+    { url = "https://files.pythonhosted.org/packages/dc/95/ede872a4172517a073997af9dc6adb183aa977d85e75947fb6cf1864c9bc/doover_tunnel-0.1.2-py3-none-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:4858ae8d89b1dcc4d7c81d03f50fc733c92c34435b0c0dce84583579d190d57e", size = 4715447, upload-time = "2026-09-22T23:02:59.402Z" },
+    { url = "https://files.pythonhosted.org/packages/fb/b6/61ae8969acd06ae90291abedfa115d2a407a9eb32c288b4223a41b21eb46/doover_tunnel-0.1.2-py3-none-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:4885d8572d119245e4cb4bc0ad4e0f6aedf4393a198a89fae42b09df379d1214", size = 2435578, upload-time = "2026-09-22T23:03:01.303Z" },
+    { url = "https://files.pythonhosted.org/packages/42/81/b77c7c86d2037c03489d9fa88ea4fe4b258ebf6d096e8aa7fa2e4846c401/doover_tunnel-0.1.2-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:1b434d6224911558caca4ec859df0c0831e4a297b21b90dc5f2b7a0d620030fb", size = 2548024, upload-time = "2026-09-22T23:03:02.997Z" },
+    { url = "https://files.pythonhosted.org/packages/f5/92/68ff8ced55a69fa8918d76fc3b6e09139fc370bee11636b0dde8cd5cec08/doover_tunnel-0.1.2-py3-none-win_amd64.whl", hash = "sha256:549c127c29efe7f89afbdd0cbe9f18aab16c9ca974f02bd2bab889bcfca53abb", size = 2589098, upload-time = "2026-09-22T23:03:04.869Z" },
 ]
 
 [[package]]

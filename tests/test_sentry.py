@@ -6,8 +6,7 @@ import click
 import pytest
 from typer.testing import CliRunner
 
-import doover_cli
-from doover_cli import app
+from doover_cli import app, cli
 from doover_cli.api import DooverCLISession
 from doover_cli.utils import sentry as sentry_utils
 from doover_cli.utils.shell_commands import run as shell_run
@@ -133,20 +132,20 @@ def test_main_captures_unhandled_exception_and_flushes(monkeypatch):
     flush_calls = []
 
     monkeypatch.setattr(
-        doover_cli.sentry_utils, "init_sentry", lambda: init_calls.append(True)
+        cli.sentry_utils, "init_sentry", lambda: init_calls.append(True)
     )
     monkeypatch.setattr(
-        doover_cli.sentry_utils,
+        cli.sentry_utils,
         "current_command_path",
         lambda: "app publish",
     )
     monkeypatch.setattr(
-        doover_cli.sentry_utils,
+        cli.sentry_utils,
         "_capture_exception",
         lambda exc, **kwargs: capture_calls.append((exc, kwargs)),
     )
     monkeypatch.setattr(
-        doover_cli.sentry_utils,
+        cli.sentry_utils,
         "flush_sentry",
         lambda: flush_calls.append(True),
     )
@@ -154,10 +153,10 @@ def test_main_captures_unhandled_exception_and_flushes(monkeypatch):
     def raise_error():
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(doover_cli, "app", raise_error)
+    monkeypatch.setattr(cli, "app", raise_error)
 
     with pytest.raises(RuntimeError):
-        doover_cli.main()
+        cli.main()
 
     assert init_calls == [True]
     assert len(capture_calls) == 1
@@ -171,25 +170,25 @@ def test_main_does_not_capture_click_exit(monkeypatch):
     capture_calls = []
     flush_calls = []
 
-    monkeypatch.setattr(doover_cli.sentry_utils, "init_sentry", lambda: None)
+    monkeypatch.setattr(cli.sentry_utils, "init_sentry", lambda: None)
     monkeypatch.setattr(
-        doover_cli.sentry_utils,
+        cli.sentry_utils,
         "_capture_exception",
         lambda exc, **kwargs: capture_calls.append((exc, kwargs)),
     )
     monkeypatch.setattr(
-        doover_cli.sentry_utils,
+        cli.sentry_utils,
         "flush_sentry",
         lambda: flush_calls.append(True),
     )
     monkeypatch.setattr(
-        doover_cli,
+        cli,
         "app",
         lambda: (_ for _ in ()).throw(click.exceptions.Exit(0)),
     )
 
     with pytest.raises(click.exceptions.Exit):
-        doover_cli.main()
+        cli.main()
 
     assert capture_calls == []
     assert flush_calls == [True]
@@ -199,25 +198,25 @@ def test_main_does_not_capture_click_abort(monkeypatch):
     capture_calls = []
     flush_calls = []
 
-    monkeypatch.setattr(doover_cli.sentry_utils, "init_sentry", lambda: None)
+    monkeypatch.setattr(cli.sentry_utils, "init_sentry", lambda: None)
     monkeypatch.setattr(
-        doover_cli.sentry_utils,
+        cli.sentry_utils,
         "_capture_exception",
         lambda exc, **kwargs: capture_calls.append((exc, kwargs)),
     )
     monkeypatch.setattr(
-        doover_cli.sentry_utils,
+        cli.sentry_utils,
         "flush_sentry",
         lambda: flush_calls.append(True),
     )
     monkeypatch.setattr(
-        doover_cli,
+        cli,
         "app",
         lambda: (_ for _ in ()).throw(click.Abort()),
     )
 
     with pytest.raises(click.Abort):
-        doover_cli.main()
+        cli.main()
 
     assert capture_calls == []
     assert flush_calls == [True]
@@ -226,7 +225,7 @@ def test_main_does_not_capture_click_abort(monkeypatch):
 def test_login_reports_handled_exception(monkeypatch):
     capture_calls = []
 
-    monkeypatch.setattr(doover_cli, "ConfigManager", FakeConfigManager)
+    monkeypatch.setattr(cli, "ConfigManager", FakeConfigManager)
     monkeypatch.setattr(
         "doover_cli.login.DooverCLIAuthClient.device_login",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("nope")),
@@ -253,7 +252,7 @@ def test_login_persists_selected_profile(monkeypatch):
 
     fake_auth = FakeAuth()
 
-    monkeypatch.setattr(doover_cli, "ConfigManager", FakeConfigManager)
+    monkeypatch.setattr(cli, "ConfigManager", FakeConfigManager)
     monkeypatch.setattr(
         "doover_cli.login.DooverCLIAuthClient.device_login",
         lambda *args, **kwargs: fake_auth,
@@ -306,7 +305,7 @@ def test_report_compose_reports_handled_exception(monkeypatch):
         def generate(self):
             raise RuntimeError("generation failed")
 
-    monkeypatch.setattr(doover_cli, "ConfigManager", FakeConfigManager)
+    monkeypatch.setattr(cli, "ConfigManager", FakeConfigManager)
     monkeypatch.setattr(
         "doover_cli.report.importlib",
         SimpleNamespace(
