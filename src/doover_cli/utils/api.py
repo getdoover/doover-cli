@@ -31,6 +31,17 @@ def setup_session(
     if os.environ.get("DOOVER_API_TOKEN"):
         return DooverCLISession.from_env()
 
+    # A service account trusting this CI job: preferred over the older
+    # trusted-publisher flow when named.
+    service_account = os.environ.get("DOOVER_SERVICE_ACCOUNT")
+    if service_account:
+        return DooverCLISession.from_service_account(
+            service_account,
+            audience=os.environ.get("DOOVER_OIDC_AUDIENCE"),
+            data_base_url=os.environ.get("DOOVER_DATA_API_BASE_URL"),
+            control_base_url=os.environ.get("DOOVER_CONTROL_API_BASE_URL"),
+        )
+
     provider = _trusted_publisher_provider()
     if provider:
         return DooverCLISession.from_trusted_publisher(

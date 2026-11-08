@@ -73,6 +73,31 @@ class DooverCLISession:
         return cls(config_manager=None, profile_name=None, auth=auth)
 
     @classmethod
+    def from_service_account(
+        cls,
+        service_account_id: str,
+        *,
+        audience: str | None = None,
+        data_base_url: str | None = None,
+        control_base_url: str | None = None,
+        timeout: float = 60.0,
+    ) -> "DooverCLISession":
+        """Build a session acting as a service account that trusts this CI job:
+        the job's OIDC token (GitHub Actions, with id-token permission) is
+        exchanged on doover-data for the account's token. No stored secret."""
+        from pydoover.api.auth import ServiceAccountAuthClient
+
+        kwargs = dict(timeout=timeout)
+        if audience:
+            kwargs["audience"] = audience
+        if data_base_url:
+            kwargs["data_base_url"] = data_base_url
+        if control_base_url:
+            kwargs["control_base_url"] = control_base_url
+        auth = ServiceAccountAuthClient(service_account_id, **kwargs)
+        return cls(config_manager=None, profile_name=None, auth=auth)
+
+    @classmethod
     def from_env(cls, *, timeout: float = 60.0) -> "DooverCLISession":
         token = os.environ.get("DOOVER_API_TOKEN")
         if not token:
