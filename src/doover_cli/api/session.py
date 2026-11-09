@@ -3,6 +3,8 @@ import os
 import typer
 
 from pydoover.api import DataClient, ControlClient
+from pydoover.api.auth._base import SyncAuthBase
+from pydoover.models.data.exceptions import TokenRefreshError
 from pydoover.api.auth import ConfigManager
 
 from .auth import DooverCLIAuthClient
@@ -98,6 +100,39 @@ class DooverCLISession:
         return cls(config_manager=None, profile_name=None, auth=auth)
 
     @classmethod
+    def from_github_actions(
+        cls,
+        *,
+        audience: str | None = None,
+        data_base_url: str | None = None,
+        control_base_url: str | None = None,
+        timeout: float = 60.0,
+    ) -> "DooverCLISession":
+        """Inside GitHub Actions with no account named: the service account
+        that trusts this job if data finds one, else trusted publishing."""
+        from pydoover.api.auth import (
+            ServiceAccountAuthClient,
+            TrustedPublisherAuthClient,
+        )
+
+        account = dict(timeout=timeout)
+        if data_base_url:
+            account["data_base_url"] = data_base_url
+        if control_base_url:
+            account["control_base_url"] = control_base_url
+        publisher = dict(
+            provider="GH", control_base_url=control_base_url, timeout=timeout
+        )
+        if audience:
+            publisher["audience"] = audience
+        auth = _ServiceAccountOrPublisher(
+            ServiceAccountAuthClient(**account),
+            TrustedPublisherAuthClient(**publisher),
+            timeout=timeout,
+        )
+        return cls(config_manager=None, profile_name=None, auth=auth)
+
+    @classmethod
     def from_env(cls, *, timeout: float = 60.0) -> "DooverCLISession":
         token = os.environ.get("DOOVER_API_TOKEN")
         if not token:
@@ -150,3 +185,34 @@ class DooverCLISession:
             return None
         raise NotImplementedError()
         # self.get_control_client().agents
+
+
+class _ServiceAccountOrPublisher(SyncAuthBase):
+    """The service account that trusts this CI job, found by data; if none
+    does (data answers 401), trusted publishing, for the rest of the run."""
+
+    def __init__(self, account, publisher, *, timeout: float):
+        super().__init__(token=None, timeout=timeout)
+        self._account = account
+        self._publisher = publisher
+        self._use_publisher = False
+        self.control_base_url = getattr(account, "control_base_url", None) or getattr(
+            publisher, "control_base_url", None
+        )
+
+    def refresh_access_token(self) -> None:
+        if not self._use_publisher:
+            try:
+                self._account.refresh_access_token()
+                self._set_access_token(
+                    self._account.token, token_expires=self._account.token_expires
+                )
+                return
+            except TokenRefreshError as e:
+                if " 401 " not in f" {e} ":
+                    raise
+                self._use_publisher = True
+        self._publisher.refresh_access_token()
+        self._set_access_token(
+            self._publisher.token, token_expires=self._publisher.token_expires
+        )

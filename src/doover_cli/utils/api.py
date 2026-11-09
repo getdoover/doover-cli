@@ -43,6 +43,14 @@ def setup_session(
         )
 
     provider = _trusted_publisher_provider()
+    if provider == "GH" and not os.environ.get("DOOVER_TRUSTED_PUBLISHER"):
+        # No account named: data finds the one trusting this job, else
+        # trusted publishing.
+        return DooverCLISession.from_github_actions(
+            audience=os.environ.get("DOOVER_OIDC_AUDIENCE"),
+            data_base_url=os.environ.get("DOOVER_DATA_API_BASE_URL"),
+            control_base_url=os.environ.get("DOOVER_CONTROL_API_BASE_URL"),
+        )
     if provider:
         return DooverCLISession.from_trusted_publisher(
             provider=provider,
