@@ -124,6 +124,7 @@ class DooverCLISession:
             provider="GH", control_base_url=control_base_url, timeout=timeout
         )
         if audience:
+            account["audience"] = audience
             publisher["audience"] = audience
         auth = _ServiceAccountOrPublisher(
             ServiceAccountAuthClient(**account),
