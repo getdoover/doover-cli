@@ -1631,3 +1631,62 @@ def test_detect_repository_url_is_none_outside_a_repo(monkeypatch, tmp_path):
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
 
     assert apps_app._detect_repository_url(tmp_path) is None
+
+
+def test_app_publish_uploads_files_the_build_made(monkeypatch, tmp_path):
+    """Files can be what ./build.sh makes: they're uploaded after it, not before."""
+    from doover_cli.utils.apps import parse_app_files
+
+    captured = []
+    app_config = FakeAppConfig(app_id=303)
+    app_config.type = "PRO"
+    app_config._payload["type"] = "PRO"
+    app_config.files = parse_app_files(
+        [{"channel": "{app_key}_firmware", "fp": ["build/firmware.bin"]}], tmp_path
+    )
+    (tmp_path / "package.zip").write_bytes(b"zip-bytes")
+
+    def build(command, cwd=None):
+        captured.append("build")
+        (tmp_path / "build").mkdir()
+        (tmp_path / "build" / "firmware.bin").write_bytes(b"image")
+
+    class FakeApplicationsClient:
+        @staticmethod
+        def processor_source(application_id, body):
+            captured.append("package")
+            return {"id": 303}
+
+        @staticmethod
+        def files_update(application_id, body):
+            captured.append(("files", [p.name for p in body["file"]]))
+
+        @staticmethod
+        def partial(application_id, body):
+            return {"id": 303}
+
+    class FakeControlClient:
+        applications = FakeApplicationsClient()
+
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_directory", lambda root=None: tmp_path
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_app_config", lambda root_fp, app_name=None: app_config
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.get_state", lambda: (FakeControlClient(), FakeRenderer())
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_config_command",
+        lambda ctx, app_fp, validate_: None,
+    )
+    monkeypatch.setattr(
+        "doover_cli.apps.apps.export_ui_command", lambda ctx, app_fp, validate_: None
+    )
+    monkeypatch.setattr("doover_cli.apps.apps.shell_run", build)
+
+    result = runner.invoke(app, ["app", "publish", str(tmp_path), "--no-release"])
+
+    assert result.exit_code == 0, result.output
+    assert captured == ["build", "package", ("files", ["firmware.bin"])]

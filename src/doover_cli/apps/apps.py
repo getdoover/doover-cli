@@ -1500,7 +1500,10 @@ def publish(
                 )
             rich.print("[green]Widget uploaded.[/green]")
 
-    if app_config.files is not None:
+    def upload_files():
+        """After the build (./build.sh, the image): the files may be what it made."""
+        if app_config.files is None:
+            return
         body = app_files_body(app_config.files)
         if missing := [str(p) for p in body["file"] if not p.exists()]:
             rich.print(f"[red]Files not found: {', '.join(missing)}.[/red]")
@@ -1559,6 +1562,7 @@ def publish(
                 root_fp,
             )
             print("Done!")
+        upload_files()
         renderer.render(processor_response or response)
         if release:
             ctx.invoke(
@@ -1633,6 +1637,7 @@ def publish(
         else:
             print("App requested to not build. Skipping build step.")
 
+    upload_files()
     release_digest = digest or detected_digest
     if release and release_digest is not None:
         ctx.invoke(
