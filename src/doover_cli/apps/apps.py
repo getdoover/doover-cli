@@ -575,6 +575,19 @@ def _image_package_uri(app_config) -> str | None:
     return (lambda_config.get("Code") or {}).get("ImageUri")
 
 
+def _upload_files(client, renderer, application_id, app_config) -> None:
+    """The app's `files`, after its build: they may be what ./build.sh made."""
+    if app_config.files is None:
+        return
+    body = app_files_body(app_config.files)
+    if missing := [str(p) for p in body["file"] if not p.exists()]:
+        rich.print(f"[red]Files not found: {', '.join(missing)}.[/red]")
+        raise typer.Exit(1)
+    with renderer.loading("Uploading files..."):
+        client.applications.files_update(str(application_id), body=body)
+    rich.print(f"[green]{len(body['file'])} file(s) uploaded.[/green]")
+
+
 def _publish_processor_package(
     client,
     app_id: int,
@@ -1500,18 +1513,6 @@ def publish(
                 )
             rich.print("[green]Widget uploaded.[/green]")
 
-    def upload_files():
-        """After the build (./build.sh, the image): the files may be what it made."""
-        if app_config.files is None:
-            return
-        body = app_files_body(app_config.files)
-        if missing := [str(p) for p in body["file"] if not p.exists()]:
-            rich.print(f"[red]Files not found: {', '.join(missing)}.[/red]")
-            raise typer.Exit(1)
-        with renderer.loading("Uploading files..."):
-            client.applications.files_update(str(application_id), body=body)
-        rich.print(f"[green]{len(body['file'])} file(s) uploaded.[/green]")
-
     artwork = {
         kind: path
         for kind, path in (
@@ -1562,7 +1563,7 @@ def publish(
                 root_fp,
             )
             print("Done!")
-        upload_files()
+        _upload_files(client, renderer, application_id, app_config)
         renderer.render(processor_response or response)
         if release:
             ctx.invoke(
@@ -1637,7 +1638,7 @@ def publish(
         else:
             print("App requested to not build. Skipping build step.")
 
-    upload_files()
+    _upload_files(client, renderer, application_id, app_config)
     release_digest = digest or detected_digest
     if release and release_digest is not None:
         ctx.invoke(
