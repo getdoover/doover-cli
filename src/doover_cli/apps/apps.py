@@ -32,6 +32,7 @@ from ..utils.api import ProfileAnnotation
 from ..registry import is_doover_registry, login_for_push, publish_github_output
 from ..utils.apps import (
     PACKAGE_APP_TYPES,
+    app_files_body,
     discover_apps,
     filter_create_only,
     get_app_directory,
@@ -1498,6 +1499,15 @@ def publish(
                     body={"file": app_config.widget_path},
                 )
             rich.print("[green]Widget uploaded.[/green]")
+
+    if app_config.files is not None:
+        body = app_files_body(app_config.files)
+        if missing := [str(p) for p in body["file"] if not p.exists()]:
+            rich.print(f"[red]Files not found: {', '.join(missing)}.[/red]")
+            raise typer.Exit(1)
+        with renderer.loading("Uploading files..."):
+            client.applications.files_update(str(application_id), body=body)
+        rich.print(f"[green]{len(body['file'])} file(s) uploaded.[/green]")
 
     artwork = {
         kind: path

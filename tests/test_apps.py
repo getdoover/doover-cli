@@ -75,6 +75,7 @@ class FakeAppConfig:
         self.icon_path = None
         self.banner_path = None
         self.build_widget_command = None
+        self.files = None
         self.save_calls = 0
         self._payload = {
             "id": app_id,
