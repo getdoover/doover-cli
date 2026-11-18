@@ -86,6 +86,7 @@ DROP_WHEN_NULL = (
     "export_ui_command",
     "run_command",
     "widget",
+    "files",
     "deployment_folder",
 )
 
@@ -108,6 +109,7 @@ KEY_ORDER = (
     "build_args",
     "widget",
     "build_widget_command",
+    "files",
     "export_config_command",
     "export_ui_command",
     "run_command",

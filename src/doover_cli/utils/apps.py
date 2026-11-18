@@ -164,6 +164,61 @@ def _resolve_local_path(
     return path
 
 
+class AppFiles:
+    """One `files` entry of doover_config.json: the files a deploy writes to
+    `channel` (`{app_key}` becomes the install's name)."""
+
+    def __init__(self, channel: str, paths: list[Path], content_type: str | None):
+        self.channel = channel
+        self.paths = paths
+        self.content_type = content_type
+
+
+def parse_app_files(raw: Any, base_path: Path | None) -> list[AppFiles] | None:
+    """`files: [{"channel", "fp": [...], "content_type"?}]`, or None when absent.
+
+    One entry per channel. The control plane takes the files by name, so a name
+    can't stand for two different files."""
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise ValueError('"files" is a list of {"channel", "fp": [...]} entries.')
+    entries, by_name = [], {}
+    for item in raw:
+        channel = item.get("channel") if isinstance(item, dict) else None
+        fps = item.get("fp") if isinstance(item, dict) else None
+        if not isinstance(channel, str) or not channel:
+            raise ValueError(f"A files entry has no channel: {item!r}.")
+        if any(e.channel == channel for e in entries):
+            raise ValueError(f"Channel {channel} is listed twice in files.")
+        if (
+            not isinstance(fps, list)
+            or not fps
+            or not all(isinstance(f, str) for f in fps)
+        ):
+            raise ValueError(f'Channel {channel}\'s "fp" is a list of paths.')
+        paths = [_resolve_local_path(f, base_path) for f in fps]
+        for path in paths:
+            if by_name.setdefault(path.name, path) != path:
+                raise ValueError(f"Two files are named {path.name}; rename one.")
+        if len({path.name for path in paths}) != len(paths):
+            raise ValueError(f"Channel {channel} lists a file twice.")
+        entries.append(AppFiles(channel, paths, item.get("content_type")))
+    return entries
+
+
+def app_files_body(entries: list[AppFiles]) -> dict[str, Any]:
+    """The upload: the manifest (each channel's file names) and each file once."""
+    manifest, paths = [], {}
+    for entry in entries:
+        item = {"channel": entry.channel, "files": [p.name for p in entry.paths]}
+        if entry.content_type:
+            item["content_type"] = entry.content_type
+        manifest.append(item)
+        paths.update({p.name: p for p in entry.paths})
+    return {"manifest": json.dumps(manifest), "file": list(paths.values())}
+
+
 class LocalApplication(ControlApplication):
     _model_name = None
 
@@ -199,6 +254,7 @@ class LocalApplication(ControlApplication):
         banner: str | Path | None = None,
         widget: str | Path | None = None,
         build_widget_command: str | None = None,
+        files: list[dict[str, Any]] | None = None,
         export_config_command: str | None = None,
         export_ui_command: str | None = None,
         export_notification_command: str | None = None,
@@ -262,6 +318,7 @@ class LocalApplication(ControlApplication):
         self.banner_path = _resolve_local_path(banner, base_path)
 
         self.build_widget_command = build_widget_command
+        self.files = parse_app_files(files, base_path)
         self.key = key
         self.build_args = build_args
         self.export_config_command = export_config_command
@@ -392,6 +449,7 @@ class LocalApplication(ControlApplication):
             banner=data.get("banner"),
             widget=data.get("widget"),
             build_widget_command=data.get("build_widget_command"),
+            files=data.get("files"),
             export_config_command=data.get("export_config_command"),
             export_ui_command=data.get("export_ui_command"),
             export_notification_command=data.get("export_notification_command"),
