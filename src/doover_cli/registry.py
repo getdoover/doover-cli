@@ -190,13 +190,34 @@ def _token_for_registry(server_url: str) -> str:
                 f"this workflow targets {control_url or 'production'}, which does "
                 f"not serve {server_url}"
             )
-        return token_from(
-            DooverCLISession.from_trusted_publisher(
-                provider=provider,
-                audience=os.environ.get("DOOVER_OIDC_AUDIENCE"),
+        # The same choice as `setup_session`: a named service account, else (on
+        # GitHub with no publisher named) the account whose trusted identity
+        # matches this job, falling back to trusted publishing. Trusted
+        # publishing alone left API keys with a trusted identity unusable for
+        # pulls: their exchange is on data, with a different audience.
+        audience = os.environ.get("DOOVER_OIDC_AUDIENCE")
+        data_url = os.environ.get("DOOVER_DATA_API_BASE_URL")
+        service_account = os.environ.get("DOOVER_SERVICE_ACCOUNT")
+        if service_account:
+            session = DooverCLISession.from_service_account(
+                service_account,
+                audience=audience,
+                data_base_url=data_url,
                 control_base_url=control_url,
             )
-        )
+        elif provider == "GH" and not os.environ.get("DOOVER_TRUSTED_PUBLISHER"):
+            session = DooverCLISession.from_github_actions(
+                audience=audience,
+                data_base_url=data_url,
+                control_base_url=control_url,
+            )
+        else:
+            session = DooverCLISession.from_trusted_publisher(
+                provider=provider,
+                audience=audience,
+                control_base_url=control_url,
+            )
+        return token_from(session)
 
     from pydoover.api.auth import ConfigManager
 

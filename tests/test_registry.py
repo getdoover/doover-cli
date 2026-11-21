@@ -366,14 +366,14 @@ class TestCredentialHelperInCI:
         monkeypatch.setenv("GITHUB_ACTIONS", "true")
         monkeypatch.setenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "runner-token")
 
-    def test_get_uses_the_trusted_publisher_flow(self, monkeypatch):
+    def test_get_uses_the_github_actions_flow(self, monkeypatch):
         monkeypatch.setenv("DOOVER_CONTROL_API_BASE_URL", "https://api.doover.com")
         out = _run_helper("get", monkeypatch=monkeypatch)
 
         session = mock.MagicMock()
         session.auth.token = "oidc-token"
         with mock.patch(
-            "doover_cli.api.session.DooverCLISession.from_trusted_publisher",
+            "doover_cli.api.session.DooverCLISession.from_github_actions",
             return_value=session,
         ) as vend:
             registry.credential_helper()
@@ -388,12 +388,52 @@ class TestCredentialHelperInCI:
         session = mock.MagicMock()
         session.auth.token = "oidc-token"
         with mock.patch(
-            "doover_cli.api.session.DooverCLISession.from_trusted_publisher",
+            "doover_cli.api.session.DooverCLISession.from_github_actions",
             return_value=session,
         ):
             registry.credential_helper()
 
         assert json.loads(out.getvalue())["Secret"] == "oidc-token"
+
+    def test_a_named_publisher_uses_trusted_publishing(self, monkeypatch):
+        monkeypatch.setenv("DOOVER_TRUSTED_PUBLISHER", "github")
+        out = _run_helper("get", monkeypatch=monkeypatch)
+
+        session = mock.MagicMock()
+        session.auth.token = "publisher-token"
+        with (
+            mock.patch(
+                "doover_cli.api.session.DooverCLISession.from_trusted_publisher",
+                return_value=session,
+            ) as vend,
+            mock.patch(
+                "doover_cli.api.session.DooverCLISession.from_github_actions"
+            ) as gha,
+        ):
+            registry.credential_helper()
+
+        assert json.loads(out.getvalue())["Secret"] == "publisher-token"
+        assert vend.call_args.kwargs["provider"] == "GH"
+        gha.assert_not_called()
+
+    def test_a_named_service_account_is_used(self, monkeypatch):
+        """An API key with a trusted identity: its exchange is on data, not the
+        publisher endpoint, so trusted publishing alone could never pull."""
+        monkeypatch.setenv("DOOVER_SERVICE_ACCOUNT", "249736704536122883")
+        monkeypatch.setenv("DOOVER_OIDC_AUDIENCE", "doover")
+        out = _run_helper("get", monkeypatch=monkeypatch)
+
+        session = mock.MagicMock()
+        session.auth.token = "account-token"
+        with mock.patch(
+            "doover_cli.api.session.DooverCLISession.from_service_account",
+            return_value=session,
+        ) as vend:
+            registry.credential_helper()
+
+        assert json.loads(out.getvalue())["Secret"] == "account-token"
+        assert vend.call_args.args == ("249736704536122883",)
+        assert vend.call_args.kwargs["audience"] == "doover"
 
     def test_a_registry_from_another_environment_is_refused(self, monkeypatch):
         """A staging workflow must not hand its token to the production registry.
@@ -406,14 +446,20 @@ class TestCredentialHelperInCI:
         )
         out = _run_helper("get", monkeypatch=monkeypatch)
 
-        with mock.patch(
-            "doover_cli.api.session.DooverCLISession.from_trusted_publisher"
-        ) as vend:
+        with (
+            mock.patch(
+                "doover_cli.api.session.DooverCLISession.from_trusted_publisher"
+            ) as vend,
+            mock.patch(
+                "doover_cli.api.session.DooverCLISession.from_github_actions"
+            ) as gha,
+        ):
             with pytest.raises(SystemExit) as exc:
                 registry.credential_helper()
 
         assert exc.value.code == 1
         assert out.getvalue() == ""
+        gha.assert_not_called()
         vend.assert_not_called()
 
     def test_a_stored_credential_still_wins(self, monkeypatch):
@@ -423,10 +469,16 @@ class TestCredentialHelperInCI:
         _store({"Username": "ci", "Secret": secret})
         out = _run_helper("get", monkeypatch=monkeypatch)
 
-        with mock.patch(
-            "doover_cli.api.session.DooverCLISession.from_trusted_publisher"
-        ) as vend:
+        with (
+            mock.patch(
+                "doover_cli.api.session.DooverCLISession.from_trusted_publisher"
+            ) as vend,
+            mock.patch(
+                "doover_cli.api.session.DooverCLISession.from_github_actions"
+            ) as gha,
+        ):
             registry.credential_helper()
 
         assert json.loads(out.getvalue())["Secret"] == secret
+        gha.assert_not_called()
         vend.assert_not_called()
