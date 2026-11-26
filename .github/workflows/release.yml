@@ -51,21 +51,5 @@ jobs:
       - name: Publish package
         if: github.event_name != 'workflow_dispatch' || (github.event_name == 'workflow_dispatch' &&  github.event.inputs.confirmation != 'false')
 
-        env:
-          REPO_SIGNING_KEY_ID: ${{ vars.APT_RELEASE_REPO_SIGNING_KEY_ID }}
-          REPO_SIGNING_KEY_PASSPHRASE: ${{ secrets.APT_RELEASE_REPO_SIGNING_KEY_PASSPHRASE }}
-
-        run: |
-          export GPG_TTY=`tty`
-          export PACKAGE_NAME=$(dh_listpackages)
-          aws s3 cp s3://doover-apt-repo-private/apt_gpg_private.backup - | \
-            gpg --import --pinentry-mode=loopback --no-tty --batch --yes --passphrase ${REPO_SIGNING_KEY_PASSPHRASE}
-          aws s3 cp debian/build/*.deb s3://doover-apt-packages/${PACKAGE_NAME}/
-          deb-s3 upload \
-            debian/build/*.deb \
-            --lock \
-            --preserve-versions \
-            --bucket "apt.u.doover.com" \
-            --s3-region "${AWS_DEFAULT_REGION}" \
-            --sign "${REPO_SIGNING_KEY_ID}" \
-            --gpg-options "\-\-pinentry-mode=loopback \-\-no-tty \-\-batch \-\-yes \-\-passphrase ${REPO_SIGNING_KEY_PASSPHRASE}"
+        # Signs with the repo key in KMS (apt-kms-sign, in the CI image): no key or passphrase here.
+        run: doover-apt-publish --preserve-versions debian/build/*.deb
